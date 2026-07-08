@@ -373,7 +373,7 @@ exports.postDataPlc_to_noi_chien_2 = async (
         },
         { new: true },
       );
-      console.log("giai đoạn 1");
+      console.log("nồi chiên 2 giai đoạn 1");
     }
     // giai đoạn 2
     if (giai_doan_2 && typeof giai_doan_2 === "boolean") {
@@ -395,7 +395,7 @@ exports.postDataPlc_to_noi_chien_2 = async (
         },
         { new: true },
       );
-      console.log("giai đoạn 2");
+      console.log("nồi chiên 2 giai đoạn 2");
     }
     //giai đoạn 3
     if (giai_doan_3 && typeof giai_doan_3 === "boolean") {
@@ -417,7 +417,7 @@ exports.postDataPlc_to_noi_chien_2 = async (
         },
         { new: true },
       );
-      console.log("giai đoạn: 3");
+      console.log("nồi chiên 2 giai đoạn: 3");
     }
     //giai đoạn 4
     if (giai_doan_4 && typeof giai_doan_4 === "boolean") {
@@ -434,7 +434,7 @@ exports.postDataPlc_to_noi_chien_2 = async (
         },
         { new: true },
       );
-      console.log("giai đoạn 4");
+      console.log("nồi chiên 2 giai đoạn 4");
     }
   }
 

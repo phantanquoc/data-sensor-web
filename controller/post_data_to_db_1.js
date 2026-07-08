@@ -373,7 +373,7 @@ exports.postDataPlc_to_noi_chien_1 = async (
         },
         { new: true },
       );
-      console.log("giai đoạn 1");
+      console.log("nồi chiên 1 giai đoạn 1");
     }
     // giai đoạn 2
     if (giai_doan_2 && typeof giai_doan_2 === "boolean") {
@@ -395,7 +395,7 @@ exports.postDataPlc_to_noi_chien_1 = async (
         },
         { new: true },
       );
-      console.log("giai đoạn 2");
+      console.log("nồi chiên 1 giai đoạn 2");
     }
     //giai đoạn 3
     if (giai_doan_3 && typeof giai_doan_3 === "boolean") {
@@ -417,7 +417,7 @@ exports.postDataPlc_to_noi_chien_1 = async (
         },
         { new: true },
       );
-      console.log("giai đoạn: 3");
+      console.log("nồi chiên 1 giai đoạn: 3");
     }
     //giai đoạn 4
     if (giai_doan_4 && typeof giai_doan_4 === "boolean") {
@@ -434,7 +434,7 @@ exports.postDataPlc_to_noi_chien_1 = async (
         },
         { new: true },
       );
-      console.log("giai đoạn 4");
+      console.log("nồi chiên 1 giai đoạn 4");
     }
   }
 
@@ -456,6 +456,7 @@ exports.postDataPlc_to_noi_chien_1 = async (
   io_.emit("noi_chien_1_data", {
     data: newData_gd_1,
     giai_doan: "Giai đoạn: 1",
+    active: giai_doan_1 && typeof giai_doan_1 === "boolean" ? true : false,
     tong_thoi_gian_chay: d60,
     set_giai_doan: {
       thoi_gian_chay: thoi_gian_chay_gd1,
@@ -470,6 +471,7 @@ exports.postDataPlc_to_noi_chien_1 = async (
   io_.emit("noi_chien_1_data", {
     data: newData_gd_2,
     giai_doan: "Giai đoạn: 2",
+    active: giai_doan_2 && typeof giai_doan_2 === "boolean" ? true : false,
     tong_thoi_gian_chay: d60,
     set_giai_doan: {
       thoi_gian_chay: thoi_gian_chay_gd2,
@@ -484,6 +486,7 @@ exports.postDataPlc_to_noi_chien_1 = async (
   io_.emit("noi_chien_1_data", {
     data: newData_gd_3,
     giai_doan: "Giai đoạn: 3",
+    active: giai_doan_3 && typeof giai_doan_3 === "boolean" ? true : false,
     tong_thoi_gian_chay: d60,
     set_giai_doan: {
       thoi_gian_chay: thoi_gian_chay_gd3,
@@ -498,6 +501,7 @@ exports.postDataPlc_to_noi_chien_1 = async (
   io_.emit("noi_chien_1_data", {
     data: newData_gd_4,
     giai_doan: "Giai đoạn: 4",
+    active: giai_doan_4 && typeof giai_doan_4 === "boolean" ? true : false,
     tong_thoi_gian_chay: d60,
     set_giai_doan: {
       thoi_gian_treo_long: thoi_gian_treo_long_gd4,
