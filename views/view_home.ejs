@@ -1507,6 +1507,7 @@
           nhiet_do_ra_bom_vong_nuoc: 0,
         },
         giai_doan: "Giai đoạn:",
+        active: false,
         tong_thoi_gian_chay: 0,
         set_giai_doan: {
           thoi_gian_chay: 0,
@@ -1612,14 +1613,16 @@
       });
 
       function realTimer_he_chien(so_noiChien, data, isActive_animation) {
+        // console.log(data);
+
         number_noi_chien.textContent = so_noiChien;
         document.querySelector(".tong_thoi_gian_chay").textContent =
           data.tong_thoi_gian_chay;
         if (data.giai_doan === "Giai đoạn: 1") {
           document.querySelector(".hien_thi_gia_doan_1").textContent =
             data.giai_doan;
-          document.querySelector(".active_gia_doan_1").innerHTML =
-            `<div style="display:flex; justify-content:center; align-items:center; height:50px; ">
+          document.querySelector(".active_gia_doan_1").innerHTML = data.active
+            ? `<div style="display:flex; justify-content:center; align-items:center; height:50px; ">
               <div class="circle">
                 <div class="inner-circle"></div>
               </div>
@@ -1654,11 +1657,12 @@
                 transform: rotate(360deg);
               }
             }
-            </style>`;
+            </style>`
+            : "";
 
-          document.querySelector(".active_gia_doan_2").textContent = "";
-          document.querySelector(".active_gia_doan_3").textContent = "";
-          document.querySelector(".active_gia_doan_4").textContent = "";
+          // document.querySelector(".active_gia_doan_2").textContent = "";
+          // document.querySelector(".active_gia_doan_3").textContent = "";
+          // document.querySelector(".active_gia_doan_4").textContent = "";
 
           document.querySelector(".thoi_gian_chay_hien_tai_1").textContent =
             data.set_giai_doan.thoi_gian_chay + " phút";
@@ -1676,8 +1680,8 @@
         if (data.giai_doan === "Giai đoạn: 2") {
           document.querySelector(".hien_thi_gia_doan_2").textContent =
             data.giai_doan;
-          document.querySelector(".active_gia_doan_2").innerHTML =
-            `<div style="display:flex; justify-content:center; align-items:center; height:50px; ">
+          document.querySelector(".active_gia_doan_2").innerHTML = data.active
+            ? `<div style="display:flex; justify-content:center; align-items:center; height:50px; ">
               <div class="circle">
                 <div class="inner-circle"></div>
               </div>
@@ -1712,10 +1716,11 @@
                 transform: rotate(360deg);
               }
             }
-            </style>`;
-          document.querySelector(".active_gia_doan_1").textContent = "";
-          document.querySelector(".active_gia_doan_3").textContent = "";
-          document.querySelector(".active_gia_doan_4").textContent = "";
+            </style>`
+            : "";
+          // document.querySelector(".active_gia_doan_1").textContent = "";
+          // document.querySelector(".active_gia_doan_3").textContent = "";
+          // document.querySelector(".active_gia_doan_4").textContent = "";
 
           document.querySelector(".thoi_gian_chay_hien_tai_2").textContent =
             data.set_giai_doan.thoi_gian_chay + " phút";
@@ -1733,8 +1738,8 @@
         if (data.giai_doan === "Giai đoạn: 3") {
           document.querySelector(".hien_thi_gia_doan_3").textContent =
             data.giai_doan;
-          document.querySelector(".active_gia_doan_3").innerHTML =
-            `<div style="display:flex; justify-content:center; align-items:center; height:50px; ">
+          document.querySelector(".active_gia_doan_3").innerHTML = data.active
+            ? `<div style="display:flex; justify-content:center; align-items:center; height:50px; ">
               <div class="circle">
                 <div class="inner-circle"></div>
               </div>
@@ -1769,11 +1774,12 @@
                 transform: rotate(360deg);
               }
             }
-            </style>`;
+            </style>`
+            : "";
 
-          document.querySelector(".active_gia_doan_1").textContent = "";
-          document.querySelector(".active_gia_doan_2").textContent = "";
-          document.querySelector(".active_gia_doan_4").textContent = "";
+          // document.querySelector(".active_gia_doan_1").textContent = "";
+          // document.querySelector(".active_gia_doan_2").textContent = "";
+          // document.querySelector(".active_gia_doan_4").textContent = "";
 
           document.querySelector(".thoi_gian_chay_hien_tai_3").textContent =
             data.set_giai_doan.thoi_gian_chay + " phút";
@@ -1791,8 +1797,8 @@
         if (data.giai_doan === "Giai đoạn: 4") {
           document.querySelector(".hien_thi_gia_doan_4").textContent =
             data.giai_doan;
-          document.querySelector(".active_gia_doan_4").innerHTML =
-            `<div style="display:flex; justify-content:center; align-items:center; height:50px; ">
+          document.querySelector(".active_gia_doan_4").innerHTML = data.active
+            ? `<div style="display:flex; justify-content:center; align-items:center; height:50px; ">
               <div class="circle">
                 <div class="inner-circle"></div>
               </div>
@@ -1827,11 +1833,12 @@
                 transform: rotate(360deg);
               }
             }
-            </style>`;
+            </style>`
+            : "";
 
-          document.querySelector(".active_gia_doan_1").textContent = "";
-          document.querySelector(".active_gia_doan_2").textContent = "";
-          document.querySelector(".active_gia_doan_3").textContent = "";
+          // document.querySelector(".active_gia_doan_1").textContent = "";
+          // document.querySelector(".active_gia_doan_2").textContent = "";
+          // document.querySelector(".active_gia_doan_3").textContent = "";
 
           document.querySelector(
             ".thoi_gian_treo_long_hien_tai_4",
@@ -1873,6 +1880,8 @@
       });
 
       socket.on("noi_chien_2_data", (data) => {
+        console.log(data);
+
         if (so_noiChien === "2") realTimer_he_chien(so_noiChien, data);
       });
       socket.on("noi_chien_2_stop", (data) => {
