@@ -374,20 +374,6 @@ exports.postDataPlc_to_noi_chien_7 = async (
         { new: true },
       );
       console.log("giai đoạn 1");
-
-      io_.emit("noi_chien_7_data", {
-        data: newData_gd_1,
-        giai_doan: "Giai đoạn: 1",
-        tong_thoi_gian_chay: d60,
-        set_giai_doan: {
-          thoi_gian_chay: thoi_gian_chay_gd1,
-          so_lan_nhung: so_lan_nhung_gd1,
-          thoi_gian_nhung: thoi_gian_nhung_gd1,
-          thoi_gian_lap_lai: thoi_gian_lap_lai_gd1,
-          nhiet_do_cai_dat: nhiet_do_cai_dat_gd1,
-          vi_tri_muc_dau: vi_tri_muc_dau_gd_1,
-        },
-      });
     }
     // giai đoạn 2
     if (giai_doan_2 && typeof giai_doan_2 === "boolean") {
@@ -410,19 +396,6 @@ exports.postDataPlc_to_noi_chien_7 = async (
         { new: true },
       );
       console.log("giai đoạn 2");
-      io_.emit("noi_chien_7_data", {
-        data: newData_gd_2,
-        giai_doan: "Giai đoạn: 2",
-        tong_thoi_gian_chay: d60,
-        set_giai_doan: {
-          thoi_gian_chay: thoi_gian_chay_gd2,
-          so_lan_nhung: so_lan_nhung_gd2,
-          thoi_gian_nhung: thoi_gian_nhung_gd2,
-          thoi_gian_lap_lai: thoi_gian_lap_lai_gd2,
-          nhiet_do_cai_dat: nhiet_do_cai_dat_gd2,
-          vi_tri_muc_dau: vi_tri_muc_dau_gd_2,
-        },
-      });
     }
     //giai đoạn 3
     if (giai_doan_3 && typeof giai_doan_3 === "boolean") {
@@ -445,19 +418,6 @@ exports.postDataPlc_to_noi_chien_7 = async (
         { new: true },
       );
       console.log("giai đoạn: 3");
-      io_.emit("noi_chien_7_data", {
-        data: newData_gd_3,
-        giai_doan: "Giai đoạn: 3",
-        tong_thoi_gian_chay: d60,
-        set_giai_doan: {
-          thoi_gian_chay: thoi_gian_chay_gd3,
-          so_lan_nhung: so_lan_nhung_gd3,
-          thoi_gian_nhung: thoi_gian_nhung_gd3,
-          thoi_gian_lap_lai: thoi_gian_lap_lai_gd3,
-          nhiet_do_cai_dat: nhiet_do_cai_dat_gd3,
-          vi_tri_muc_dau: vi_tri_muc_dau_gd_3,
-        },
-      });
     }
     //giai đoạn 4
     if (giai_doan_4 && typeof giai_doan_4 === "boolean") {
@@ -475,14 +435,6 @@ exports.postDataPlc_to_noi_chien_7 = async (
         { new: true },
       );
       console.log("giai đoạn 4");
-      io_.emit("noi_chien_7_data", {
-        data: newData_gd_4,
-        giai_doan: "Giai đoạn: 4",
-        tong_thoi_gian_chay: d60,
-        set_giai_doan: {
-          thoi_gian_treo_long: thoi_gian_treo_long_gd4,
-        },
-      });
     }
   }
 
@@ -500,4 +452,60 @@ exports.postDataPlc_to_noi_chien_7 = async (
       stop: "đã hoang thành xong mẽ chiên",
     });
   }
+
+  // view realtime
+  io_.emit("noi_chien_7_data", {
+    data: newData_gd_1,
+    giai_doan: "Giai đoạn: 1",
+    active: giai_doan_1 && typeof giai_doan_1 === "boolean" ? true : false,
+    tong_thoi_gian_chay: d60,
+    set_giai_doan: {
+      thoi_gian_chay: thoi_gian_chay_gd1,
+      so_lan_nhung: so_lan_nhung_gd1,
+      thoi_gian_nhung: thoi_gian_nhung_gd1,
+      thoi_gian_lap_lai: thoi_gian_lap_lai_gd1,
+      nhiet_do_cai_dat: nhiet_do_cai_dat_gd1,
+      vi_tri_muc_dau: vi_tri_muc_dau_gd_1,
+    },
+  });
+
+  io_.emit("noi_chien_7_data", {
+    data: newData_gd_2,
+    giai_doan: "Giai đoạn: 2",
+    active: giai_doan_2 && typeof giai_doan_2 === "boolean" ? true : false,
+    tong_thoi_gian_chay: d60,
+    set_giai_doan: {
+      thoi_gian_chay: thoi_gian_chay_gd2,
+      so_lan_nhung: so_lan_nhung_gd2,
+      thoi_gian_nhung: thoi_gian_nhung_gd2,
+      thoi_gian_lap_lai: thoi_gian_lap_lai_gd2,
+      nhiet_do_cai_dat: nhiet_do_cai_dat_gd2,
+      vi_tri_muc_dau: vi_tri_muc_dau_gd_2,
+    },
+  });
+
+  io_.emit("noi_chien_7_data", {
+    data: newData_gd_3,
+    giai_doan: "Giai đoạn: 3",
+    active: giai_doan_3 && typeof giai_doan_3 === "boolean" ? true : false,
+    tong_thoi_gian_chay: d60,
+    set_giai_doan: {
+      thoi_gian_chay: thoi_gian_chay_gd3,
+      so_lan_nhung: so_lan_nhung_gd3,
+      thoi_gian_nhung: thoi_gian_nhung_gd3,
+      thoi_gian_lap_lai: thoi_gian_lap_lai_gd3,
+      nhiet_do_cai_dat: nhiet_do_cai_dat_gd3,
+      vi_tri_muc_dau: vi_tri_muc_dau_gd_3,
+    },
+  });
+
+  io_.emit("noi_chien_7_data", {
+    data: newData_gd_4,
+    giai_doan: "Giai đoạn: 4",
+    active: giai_doan_4 && typeof giai_doan_4 === "boolean" ? true : false,
+    tong_thoi_gian_chay: d60,
+    set_giai_doan: {
+      thoi_gian_treo_long: thoi_gian_treo_long_gd4,
+    },
+  });
 };
