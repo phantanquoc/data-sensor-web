@@ -373,7 +373,7 @@ exports.postDataPlc_to_noi_chien_3 = async (
         },
         { new: true },
       );
-      console.log("giai đoạn 1");
+      console.log("nồi chiên 4 giai đoạn 1");
     }
     // giai đoạn 2
     if (giai_doan_2 && typeof giai_doan_2 === "boolean") {
