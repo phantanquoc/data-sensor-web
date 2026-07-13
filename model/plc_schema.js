@@ -426,4 +426,12 @@ const plcSchema = new Schema({
     ],
   },
 });
-module.exports = mongoose.model("noi_chien_6", plcSchema);
+
+// Register and export all 8 models indexed by fryer number (1-based)
+// plcModels[1] = noi_chien_1, plcModels[2] = noi_chien_2, ..., plcModels[8] = noi_chien_8
+const plcModels = {};
+for (let n = 1; n <= 8; n++) {
+  plcModels[n] = mongoose.model("noi_chien_" + n, plcSchema);
+}
+
+module.exports = plcModels;

@@ -1,16 +1,34 @@
-const PLCData_noi_chien_6 = require("../model/noi_chien_6_data");
-const Buffer = require("buffer").Buffer;
-let id_document_plc_6;
+const { Buffer } = require("buffer");
 
-exports.postDataPlc_to_noi_chien_6 = async (
+// id_document keyed by fryer index (n = 1..8), module-scoped in memory
+// Behavior including loss on restart is unchanged.
+const id_document = {};
+
+/**
+ * postDataPlc - single parameterized function replacing the 8 post_data_to_db_* files.
+ *
+ * @param {object} model     - Mongoose model for noi_chien_N
+ * @param {number} n         - fryer index 1..8
+ * @param {object} values    - register values map
+ * @param {object} io_       - Socket.IO server instance
+ * @param {number} Start     - current Start counter (0, 1, or 2)
+ * @param {*} giai_doan_1    - boolean or falsy (M155 coil)
+ * @param {*} giai_doan_2    - boolean or falsy (M124 coil)
+ * @param {*} giai_doan_3    - boolean or falsy (M126 coil)
+ * @param {*} giai_doan_4    - boolean or falsy (M127 coil)
+ */
+exports.postDataPlc = async (
+  model,
+  n,
   values,
   io_,
-  Start_PLC6,
+  Start,
   giai_doan_1,
   giai_doan_2,
   giai_doan_3,
   giai_doan_4,
 ) => {
+  // --- Float assembly (Buffer LE 32-bit pairs) ---
   let d2 = values && values["D2"] !== undefined ? values["D2"] : 0;
   let d3 = values && values["D3"] !== undefined ? values["D3"] : 0;
   const buf_2_3 = Buffer.alloc(4);
@@ -53,34 +71,7 @@ exports.postDataPlc_to_noi_chien_6 = async (
   buf_571_572.writeUInt16LE(d572, 2);
   let d_571_572 = parseFloat(buf_571_572.readFloatLE(0).toFixed(2));
 
-  // let d704 = values && values["D704"] !== undefined ? values["D704"] : 0;
-  // let d705 = values && values["D705"] !== undefined ? values["D705"] : 0;
-  // const buf_704_705 = Buffer.alloc(4);
-  // buf_704_705.writeUInt16LE(d704, 0);
-  // buf_704_705.writeUInt16LE(d705, 2);
-  // let d_704_705 = parseFloat(buf_704_705.readFloatLE(0).toFixed(2));
-
-  // let d710 = values && values["D710"] !== undefined ? values["D710"] : 0;
-  // let d711 = values && values["D711"] !== undefined ? values["D711"] : 0;
-  // const buf_710_711 = Buffer.alloc(4);
-  // buf_710_711.writeUInt16LE(d710, 0);
-  // buf_710_711.writeUInt16LE(d711, 2);
-  // let d_710_711 = parseFloat(buf_710_711.readFloatLE(0).toFixed(2));
-
-  // let d716 = values && values["D716"] !== undefined ? values["D716"] : 0;
-  // let d717 = values && values["D717"] !== undefined ? values["D717"] : 0;
-  // const buf_716_717 = Buffer.alloc(4);
-  // buf_716_717.writeUInt16LE(d716, 0);
-  // buf_716_717.writeUInt16LE(d717, 2);
-  // let d_716_717 = parseFloat(buf_716_717.readFloatLE(0).toFixed(2));
-
-  // let d722 = values && values["D722"] !== undefined ? values["D722"] : 0;
-  // let d723 = values && values["D723"] !== undefined ? values["D723"] : 0;
-  // const buf_722_723 = Buffer.alloc(4);
-  // buf_722_723.writeUInt16LE(d722, 0);
-  // buf_722_723.writeUInt16LE(d723, 2);
-  // let d_722_723 = parseFloat(buf_722_723.readFloatLE(0).toFixed(2));
-
+  // D84..D87 divided by 10
   let d84 = values && values["D84"] !== undefined ? values["D84"] : 0;
   let d85 = values && values["D85"] !== undefined ? values["D85"] : 0;
   let d86 = values && values["D86"] !== undefined ? values["D86"] : 0;
@@ -88,6 +79,7 @@ exports.postDataPlc_to_noi_chien_6 = async (
 
   let d60 = values && values["D60"] !== undefined ? values["D60"] : 0;
 
+  // --- Stage params ---
   //giai đoạn 1
   let thoi_gian_chay_gd1 =
     values && values["D260"] !== undefined ? values["D260"] : 0;
@@ -145,7 +137,8 @@ exports.postDataPlc_to_noi_chien_6 = async (
   //giai đoạn 4
   let thoi_gian_treo_long_gd4 =
     values && values["D214"] !== undefined ? values["D214"] : 0;
-  // save data to mongoo
+
+  // --- Document initial shape ---
   const dataFormat = {
     thoi_gian_start: new Date().toLocaleString("vi-VN"),
     thoi_gian_stop: "",
@@ -169,10 +162,8 @@ exports.postDataPlc_to_noi_chien_6 = async (
           thoi_gian_lap_lai: 0,
           nhiet_do_cai_dat: 0,
           vi_tri_dung: 0,
-
           dong_dien_dong_co_root: 0,
           dong_dien_dong_co_vong_nuoc: 0,
-
           nhiet_do_vao_binh_sinh_han: 0,
           nhiet_do_ra_binh_sinh_han: 0,
           nhiet_do_vao_bom_vong_nuoc: 0,
@@ -199,10 +190,8 @@ exports.postDataPlc_to_noi_chien_6 = async (
           thoi_gian_lap_lai: 0,
           nhiet_do_cai_dat: 0,
           vi_tri_dung: 0,
-
           dong_dien_dong_co_root: 0,
           dong_dien_dong_co_vong_nuoc: 0,
-
           nhiet_do_vao_binh_sinh_han: 0,
           nhiet_do_ra_binh_sinh_han: 0,
           nhiet_do_vao_bom_vong_nuoc: 0,
@@ -229,15 +218,12 @@ exports.postDataPlc_to_noi_chien_6 = async (
           thoi_gian_lap_lai: 0,
           nhiet_do_cai_dat: 0,
           vi_tri_dung: 0,
-
           dong_dien_dong_co_root: 0,
           dong_dien_dong_co_vong_nuoc: 0,
-
           nhiet_do_vao_binh_sinh_han: 0,
           nhiet_do_ra_binh_sinh_han: 0,
           nhiet_do_vao_bom_vong_nuoc: 0,
           nhiet_do_ra_bom_vong_nuoc: 0,
-
           vi_tri_muc_dau: 0,
         },
       ],
@@ -253,7 +239,6 @@ exports.postDataPlc_to_noi_chien_6 = async (
           nhiet_do: 0,
           dong_dien_dong_co_root: 0,
           dong_dien_dong_co_vong_nuoc: 0,
-
           nhiet_do_vao_binh_sinh_han: 0,
           nhiet_do_ra_binh_sinh_han: 0,
           nhiet_do_vao_bom_vong_nuoc: 0,
@@ -274,10 +259,8 @@ exports.postDataPlc_to_noi_chien_6 = async (
     thoi_gian_lap_lai: thoi_gian_lap_lai_gd1,
     nhiet_do_cai_dat: nhiet_do_cai_dat_gd1,
     vi_tri_dung: vi_tri_muc_dau_gd_1,
-
     dong_dien_dong_co_root: d_575_576,
     dong_dien_dong_co_vong_nuoc: d_571_572,
-
     nhiet_do_vao_binh_sinh_han: d84 / 10,
     nhiet_do_ra_binh_sinh_han: d85 / 10,
     nhiet_do_vao_bom_vong_nuoc: d86 / 10,
@@ -295,10 +278,8 @@ exports.postDataPlc_to_noi_chien_6 = async (
     thoi_gian_lap_lai: thoi_gian_lap_lai_gd2,
     nhiet_do_cai_dat: nhiet_do_cai_dat_gd2,
     vi_tri_dung: vi_tri_muc_dau_gd_2,
-
     dong_dien_dong_co_root: d_575_576,
     dong_dien_dong_co_vong_nuoc: d_571_572,
-
     nhiet_do_vao_binh_sinh_han: d84 / 10,
     nhiet_do_ra_binh_sinh_han: d85 / 10,
     nhiet_do_vao_bom_vong_nuoc: d86 / 10,
@@ -316,10 +297,8 @@ exports.postDataPlc_to_noi_chien_6 = async (
     thoi_gian_lap_lai: thoi_gian_lap_lai_gd3,
     nhiet_do_cai_dat: nhiet_do_cai_dat_gd3,
     vi_tri_dung: vi_tri_muc_dau_gd_3,
-
     dong_dien_dong_co_root: d_575_576,
     dong_dien_dong_co_vong_nuoc: d_571_572,
-
     nhiet_do_vao_binh_sinh_han: d84 / 10,
     nhiet_do_ra_binh_sinh_han: d85 / 10,
     nhiet_do_vao_bom_vong_nuoc: d86 / 10,
@@ -334,29 +313,26 @@ exports.postDataPlc_to_noi_chien_6 = async (
     nhiet_do: d_134_135,
     dong_dien_dong_co_root: d_575_576,
     dong_dien_dong_co_vong_nuoc: d_571_572,
-
     nhiet_do_vao_binh_sinh_han: d84 / 10,
     nhiet_do_ra_binh_sinh_han: d85 / 10,
     nhiet_do_vao_bom_vong_nuoc: d86 / 10,
     nhiet_do_ra_bom_vong_nuoc: d87 / 10,
   };
 
+  // --- Batch lifecycle ---
   // khởi tạo
-  if (Start_PLC6 === 1) {
-    const docunent = await PLCData_noi_chien_6.create(dataFormat).catch(
-      (err) => {
-        console.log(err);
-      },
-    );
-    if (docunent) id_document_plc_6 = docunent._id;
+  if (Start === 1) {
+    const docunent = await model.create(dataFormat).catch((err) => {
+      console.log(err);
+    });
+    if (docunent) id_document[n] = docunent._id;
   }
   // update
-  if (Start_PLC6 > 1) {
-    // read mongoodb về và update data
+  if (Start > 1) {
     //giai đoạn 1
     if (giai_doan_1 && typeof giai_doan_1 === "boolean") {
-      const document = await PLCData_noi_chien_6.findByIdAndUpdate(
-        id_document_plc_6,
+      const document = await model.findByIdAndUpdate(
+        id_document[n],
         {
           tong_thoi_gian_chay: d60,
           $set: {
@@ -373,12 +349,12 @@ exports.postDataPlc_to_noi_chien_6 = async (
         },
         { new: true },
       );
-      console.log("nồi chiên 6 giai đoạn 1");
+      console.log("nồi chiên " + n + " giai đoạn 1");
     }
     // giai đoạn 2
     if (giai_doan_2 && typeof giai_doan_2 === "boolean") {
-      const document = await PLCData_noi_chien_6.findByIdAndUpdate(
-        id_document_plc_6,
+      const document = await model.findByIdAndUpdate(
+        id_document[n],
         {
           tong_thoi_gian_chay: d60,
           $set: {
@@ -395,12 +371,12 @@ exports.postDataPlc_to_noi_chien_6 = async (
         },
         { new: true },
       );
-      console.log("nồi chiên 6 giai đoạn 2");
+      console.log("nồi chiên " + n + " giai đoạn 2");
     }
     //giai đoạn 3
     if (giai_doan_3 && typeof giai_doan_3 === "boolean") {
-      const document = await PLCData_noi_chien_6.findByIdAndUpdate(
-        id_document_plc_6,
+      const document = await model.findByIdAndUpdate(
+        id_document[n],
         {
           tong_thoi_gian_chay: d60,
           $set: {
@@ -417,12 +393,12 @@ exports.postDataPlc_to_noi_chien_6 = async (
         },
         { new: true },
       );
-      console.log("nồi chiên 6 giai đoạn: 3");
+      console.log("nồi chiên " + n + " giai đoạn: 3");
     }
     //giai đoạn 4
     if (giai_doan_4 && typeof giai_doan_4 === "boolean") {
-      const document = await PLCData_noi_chien_6.findByIdAndUpdate(
-        id_document_plc_6,
+      const document = await model.findByIdAndUpdate(
+        id_document[n],
         {
           tong_thoi_gian_chay: d60,
           $set: {
@@ -434,27 +410,26 @@ exports.postDataPlc_to_noi_chien_6 = async (
         },
         { new: true },
       );
-      console.log("nồi chiên 6 giai đoạn 4");
+      console.log("nồi chiên " + n + " giai đoạn 4");
     }
   }
 
   // update stop
-  if (Start_PLC6 === 0) {
-    const document = await PLCData_noi_chien_6.findByIdAndUpdate(
-      id_document_plc_6,
+  if (Start === 0) {
+    const document = await model.findByIdAndUpdate(
+      id_document[n],
       {
         thoi_gian_stop: new Date().toLocaleString("vi-VN"),
       },
       { new: true },
     );
     console.log(document);
-    io_.emit("noi_chien_6_stop", {
+    io_.emit("noi_chien_" + n + "_stop", {
       stop: "đã hoang thành xong mẽ chiên",
     });
   }
 
-  // view realtime
-  io_.emit("noi_chien_6_data", {
+  io_.emit("noi_chien_" + n + "_data", {
     data: newData_gd_1,
     giai_doan: "Giai đoạn: 1",
     active: giai_doan_1 && typeof giai_doan_1 === "boolean" ? true : false,
@@ -469,7 +444,7 @@ exports.postDataPlc_to_noi_chien_6 = async (
     },
   });
 
-  io_.emit("noi_chien_6_data", {
+  io_.emit("noi_chien_" + n + "_data", {
     data: newData_gd_2,
     giai_doan: "Giai đoạn: 2",
     active: giai_doan_2 && typeof giai_doan_2 === "boolean" ? true : false,
@@ -484,7 +459,7 @@ exports.postDataPlc_to_noi_chien_6 = async (
     },
   });
 
-  io_.emit("noi_chien_6_data", {
+  io_.emit("noi_chien_" + n + "_data", {
     data: newData_gd_3,
     giai_doan: "Giai đoạn: 3",
     active: giai_doan_3 && typeof giai_doan_3 === "boolean" ? true : false,
@@ -499,7 +474,7 @@ exports.postDataPlc_to_noi_chien_6 = async (
     },
   });
 
-  io_.emit("noi_chien_6_data", {
+  io_.emit("noi_chien_" + n + "_data", {
     data: newData_gd_4,
     giai_doan: "Giai đoạn: 4",
     active: giai_doan_4 && typeof giai_doan_4 === "boolean" ? true : false,

@@ -1,0 +1,26 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: iot_mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    restart: unless-stopped
+
+  iot-gateway:
+    build: .
+    container_name: iot_gateway
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      # Trong mạng Docker gọi MongoDB qua tên service "mongo", không dùng localhost
+      - MONGO_URI=mongodb://mongo:27017/mydb
+    depends_on:
+      - mongo
+    restart: unless-stopped
+
+volumes:
+  mongo_data:

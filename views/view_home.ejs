@@ -1598,6 +1598,8 @@
             default:
               break;
           }
+          // Sau khi đổi tab: tự nạp danh sách mẻ + giá trị realtime của nồi vừa chọn
+          auto_load_noi_chien(so_noiChien);
         });
       });
 
@@ -1869,6 +1871,76 @@
           ".value_nhiet_do_ra_dong_co_vong_nuoc",
         ).textContent = data.data.nhiet_do_ra_bom_vong_nuoc;
       }
+      // Tự nạp trạng thái nồi được chọn ngay lập tức: danh sách mẻ + giá trị realtime
+      // (không chờ socket). Dựng lại payload dạng socket từ document DB.
+      function auto_load_noi_chien(n) {
+        const soN = String(n);
+        fetch(`http://localhost:3000/get_noi_chien?so_noiChien=${Number(n)}`)
+          .then((res) => res.json())
+          .then((documents) => {
+            if (!Array.isArray(documents)) return;
+            // 1) Nạp danh sách mẻ chiên vào bảng
+            loadDocuments(documents);
+            if (documents.length === 0) {
+              // Không có mẻ nào → giữ trạng thái reset (0)
+              reset_realTimer_he_chien(soN, data_reset);
+              return;
+            }
+            // 2) Chọn mẻ đang chạy (chưa stop), nếu không có thì lấy mẻ mới nhất
+            const running = documents.find(
+              (d) => d.thoi_gian_stop === "" || d.thoi_gian_stop == null,
+            );
+            const doc = running || documents[documents.length - 1];
+
+            const ZERO = {
+              ap_suat_vo_hoi: 0,
+              ap_suat_chan_khong: 0,
+              ap_suat_vong_nuoc: 0,
+              nhiet_do: 0,
+              dong_dien_dong_co_root: 0,
+              dong_dien_dong_co_vong_nuoc: 0,
+              nhiet_do_vao_binh_sinh_han: 0,
+              nhiet_do_ra_binh_sinh_han: 0,
+              nhiet_do_vao_bom_vong_nuoc: 0,
+              nhiet_do_ra_bom_vong_nuoc: 0,
+            };
+            const lastOf = (gd) =>
+              gd && Array.isArray(gd.bien_du_lieu) && gd.bien_du_lieu.length
+                ? gd.bien_du_lieu[gd.bien_du_lieu.length - 1]
+                : ZERO;
+
+            // 3) Dựng lại 4 payload giai đoạn (thứ tự 1→4 giống backend emit)
+            for (let g = 1; g <= 3; g++) {
+              const gd = doc["giai_doan_" + g] || {};
+              realTimer_he_chien(soN, {
+                data: lastOf(gd),
+                giai_doan: "Giai đoạn: " + g,
+                active: false,
+                tong_thoi_gian_chay: doc.tong_thoi_gian_chay,
+                set_giai_doan: {
+                  thoi_gian_chay: gd.thoi_gian_chay,
+                  so_lan_nhung: gd.so_lan_nhung,
+                  thoi_gian_nhung: gd.thoi_gian_nhung,
+                  thoi_gian_lap_lai: gd.thoi_gian_lap_lai,
+                  nhiet_do_cai_dat: gd.nhiet_do_cai_dat,
+                  vi_tri_muc_dau: gd.vi_tri_dung,
+                },
+              });
+            }
+            const gd4 = doc.giai_doan_4 || {};
+            realTimer_he_chien(soN, {
+              data: lastOf(gd4),
+              giai_doan: "Giai đoạn: 4",
+              active: false,
+              tong_thoi_gian_chay: doc.tong_thoi_gian_chay,
+              set_giai_doan: {
+                thoi_gian_treo_long: gd4.thoi_gian_treo_long,
+              },
+            });
+          })
+          .catch((err) => console.log("auto_load_noi_chien error:", err));
+      }
+
       socket.on("noi_chien_1_data", (data) => {
         if (so_noiChien === "1") realTimer_he_chien(so_noiChien, data);
       });
@@ -2305,6 +2377,9 @@
 
         app.innerHTML = html;
       }
+
+      // Tự nạp trạng thái nồi mặc định (nồi 1) ngay khi mở trang
+      auto_load_noi_chien(so_noiChien);
     </script>
   </body>
 </html>
