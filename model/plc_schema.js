@@ -10,6 +10,11 @@ const plcSchema = new Schema({
     type: String,
     require: true,
   },
+  // Cờ đánh dấu mẻ bị đóng ép do khởi động lại hệ thống
+  dong_ep_khoi_dong: {
+    type: Boolean,
+    default: false,
+  },
   // D42
   tong_thoi_gian_chay: {
     type: Number,

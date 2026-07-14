@@ -322,6 +322,12 @@ exports.postDataPlc = async (
   // --- Batch lifecycle ---
   // khởi tạo
   if (Start === 1) {
+    // Đóng mọi mẻ chưa stop cũ của nồi này trước khi tạo mẻ mới
+    await model.updateMany(
+      { thoi_gian_stop: "" },
+      { $set: { thoi_gian_stop: new Date().toLocaleString("vi-VN") } },
+    ).catch((err) => console.log(err));
+
     const docunent = await model.create(dataFormat).catch((err) => {
       console.log(err);
     });

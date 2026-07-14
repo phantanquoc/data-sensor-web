@@ -27,6 +27,7 @@ app.use(home);
 
 let dbConnected = false;
 let isServer = false;
+let orphanCleanupDone = false;
 
 let io_; // tạo socket
 function startServer() {
@@ -91,7 +92,10 @@ async function connectMongo() {
 }
 mongoose.connection.on("connected", () => {
   dbConnected = true;
-  console.log("MongoDB Connected");
+  if (!orphanCleanupDone) {
+    orphanCleanupDone = true;
+    cleanupOrphanBatches();
+  }
 });
 mongoose.connection.on("disconnected", () => {
   dbConnected = false;
@@ -111,6 +115,17 @@ const { plcConnections, connect, getStatus, updateStatus } = require("./connectP
 const plcModels = require("./model/plc_schema");
 const { postDataPlc } = require("./controller/post_data_plc");
 const { Buffer } = require("buffer");
+
+// Dọn mẻ mồ côi (mẻ chưa stop) khi khởi động lại hệ thống
+async function cleanupOrphanBatches() {
+  for (let n = 1; n <= 8; n++) {
+    await plcModels[n].updateMany(
+      { thoi_gian_stop: "" },
+      { $set: { thoi_gian_stop: new Date().toLocaleString("vi-VN"), dong_ep_khoi_dong: true } },
+    ).catch((err) => console.log(err));
+  }
+  console.log("Đã dọn mẻ mồ côi");
+}
 
 // Shared register-list template — cloned per fryer so each fryer owns its reg.val state
 const REGISTER_LIST_TEMPLATE = [
