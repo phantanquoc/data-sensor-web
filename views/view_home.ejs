@@ -926,7 +926,7 @@
       function hien_thi_danh_sach_document() {
         let number_so_noiChien = Number(so_noiChien);
         fetch(
-          `http://localhost:3000/get_noi_chien?so_noiChien=${number_so_noiChien}`,
+          `/get_noi_chien?so_noiChien=${number_so_noiChien}`,
         )
           .then((res) => {
             return res.json();
@@ -999,7 +999,7 @@
       function viewDocument(id) {
         alert("Xem document: " + id);
         fetch(
-          `http://localhost:3000/get_noi_chien_detail?id=${id}&so_noiChien=${so_noiChien}`,
+          `/get_noi_chien_detail?id=${id}&so_noiChien=${so_noiChien}`,
         )
           .then((res) => {
             return res.json();
@@ -1333,7 +1333,7 @@
       function deleteDocument(id) {
         alert("Xóa document: " + id);
         fetch(
-          `http://localhost:3000/xoa_noi_chien_detail?id=${id}&so_noiChien=${so_noiChien}`,
+          `/xoa_noi_chien_detail?id=${id}&so_noiChien=${so_noiChien}`,
           {
             method: "DELETE",
           },
@@ -1390,6 +1390,7 @@
       const number_noi_chien = document.querySelector(".number_noi_chien");
 
       function reset_realTimer_he_chien(so_noiChien, data) {
+        resetDonutState();
         number_noi_chien.textContent = so_noiChien;
         document.querySelector(".tong_thoi_gian_chay").textContent =
           data.tong_thoi_gian_chay;
@@ -1519,6 +1520,112 @@
           thoi_gian_treo_long: 0,
         },
       };
+      // --- Donut Stage Timer State ---
+      var stageTimer = { stage: null, startMs: 0, targetMin: 0 };
+      var donutIntervalId = null;
+      var currentRunningDoc = null; // doc đang chạy, dùng để seed startMs sau reload
+
+      // Parse chuỗi "HH:MM:SS DD/MM/YYYY" -> Date, trả null nếu không hợp lệ
+      function parseTs(str) {
+        if (!str || typeof str !== 'string' || str.trim() === '') return null;
+        var parts = str.trim().split(' ');
+        if (parts.length < 2) return null;
+        var timeParts = parts[0].split(':');
+        var dateParts = parts[1].split('/');
+        if (timeParts.length < 3 || dateParts.length < 3) return null;
+        var h = parseInt(timeParts[0], 10);
+        var m = parseInt(timeParts[1], 10);
+        var s = parseInt(timeParts[2], 10);
+        var d = parseInt(dateParts[0], 10);
+        var mo = parseInt(dateParts[1], 10);
+        var y = parseInt(dateParts[2], 10);
+        if (isNaN(h) || isNaN(m) || isNaN(s) || isNaN(d) || isNaN(mo) || isNaN(y)) return null;
+        return new Date(y, mo - 1, d, h, m, s);
+      }
+
+      // Render SVG donut vào selector cho giai đoạn stageNum
+      function renderDonut(stageNum) {
+        var el = document.querySelector('.active_gia_doan_' + stageNum);
+        if (!el) return;
+        if (stageTimer.stage !== stageNum) { el.innerHTML = ''; return; }
+        var elapsedMs = Date.now() - stageTimer.startMs;
+        var elapsedMin = elapsedMs / 60000;
+        var targetMin = stageTimer.targetMin;
+        var pct = 0;
+        var color = '#00aaff';
+        var targetText = '--';
+        if (targetMin > 0) {
+          pct = Math.min((elapsedMin / targetMin) * 100, 100);
+          targetText = String(Math.round(targetMin));
+          if (elapsedMin > targetMin) { color = '#fd7e14'; }
+        }
+        var elapsedText = elapsedMin.toFixed(1);
+        // SVG donut: radius=27, circumference=2*pi*27=169.646
+        var circ = 169.646;
+        var dashOffset = circ - (circ * pct / 100);
+        var strokeBg = '#e0e0e0';
+        el.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;height:70px;">' +
+          '<svg width="70" height="70" viewBox="0 0 70 70">' +
+            '<circle cx="35" cy="35" r="27" fill="none" stroke="' + strokeBg + '" stroke-width="5"/>' +
+            (targetMin > 0 ? '<circle cx="35" cy="35" r="27" fill="none" stroke="' + color + '" stroke-width="5" ' +
+              'stroke-dasharray="' + circ.toFixed(3) + '" stroke-dashoffset="' + dashOffset.toFixed(3) + '" ' +
+              'stroke-linecap="round" transform="rotate(-90 35 35)" style="transition:stroke-dashoffset 0.3s;"/>' : '') +
+            '<text x="35" y="33" text-anchor="middle" font-size="9" fill="#333" font-weight="bold">' +
+              elapsedText + ' / ' + targetText +
+            '</text>' +
+            '<text x="35" y="44" text-anchor="middle" font-size="8" fill="#666">phút</text>' +
+          '</svg>' +
+        '</div>';
+      }
+
+      // Bắt đầu interval 1s cho donut (chỉ tạo 1 interval duy nhất)
+      function startDonutInterval() {
+        if (donutIntervalId != null) return; // đã chạy rồi
+        donutIntervalId = setInterval(function() {
+          if (stageTimer.stage != null) {
+            renderDonut(stageTimer.stage);
+          }
+        }, 1000);
+      }
+
+      // Dừng interval donut
+      function stopDonutInterval() {
+        if (donutIntervalId != null) {
+          clearInterval(donutIntervalId);
+          donutIntervalId = null;
+        }
+      }
+
+      // Reset toàn bộ donut timer state
+      function resetDonutState() {
+        stageTimer.stage = null;
+        stageTimer.startMs = 0;
+        stageTimer.targetMin = 0;
+        stopDonutInterval();
+        for (var i = 1; i <= 4; i++) {
+          var el = document.querySelector('.active_gia_doan_' + i);
+          if (el) el.innerHTML = '';
+        }
+        currentRunningDoc = null;
+      }
+
+      // Seed startMs từ DB document cho giai đoạn gNum
+      function seedStartMsFromDoc(gNum) {
+        if (!currentRunningDoc) return Date.now();
+        var gdKey = 'giai_doan_' + gNum;
+        var gd = currentRunningDoc[gdKey];
+        if (!gd || !Array.isArray(gd.bien_du_lieu) || gd.bien_du_lieu.length < 2) return Date.now();
+        var first = gd.bien_du_lieu[1]; // dòng [0] là bản ghi khởi tạo (thoi_gian rỗng), thực bắt đầu từ [1]
+        var last = gd.bien_du_lieu[gd.bien_du_lieu.length - 1];
+        var tsFirst = parseTs(first.thoi_gian);
+        var tsLast = parseTs(last.thoi_gian);
+        if (!tsFirst || !tsLast) return Date.now();
+        var elapsedAtSeed = tsLast.getTime() - tsFirst.getTime();
+        if (elapsedAtSeed < 0) elapsedAtSeed = 0;
+        return Date.now() - elapsedAtSeed;
+      }
+      // --- End Donut Stage Timer ---
+
       const buttons = document.querySelectorAll(".tab-btn");
       let so_noiChien = "1";
       let pre_status_buttons = "1";
@@ -1615,7 +1722,7 @@
       });
 
       function realTimer_he_chien(so_noiChien, data, isActive_animation) {
-        // console.log(data);
+        console.log("[Nồi chiên " + so_noiChien + "]", data);
 
         number_noi_chien.textContent = so_noiChien;
         document.querySelector(".tong_thoi_gian_chay").textContent =
@@ -1623,48 +1730,32 @@
         if (data.giai_doan === "Giai đoạn: 1") {
           document.querySelector(".hien_thi_gia_doan_1").textContent =
             data.giai_doan;
-          document.querySelector(".active_gia_doan_1").innerHTML = data.active
-            ? `<div style="display:flex; justify-content:center; align-items:center; height:50px; ">
-              <div class="circle">
-                <div class="inner-circle"></div>
-              </div>
-            </div>
-
-            <style>
-            .circle {
-              width: 60px;
-              height: 60px;
-              border: 2px solid rgba(0, 150, 255, 0.2);
-              border-top: 2px solid #00aaff;
-              border-radius: 50%;
-              display: flex;
-              justify-content: center;
-              align-items: center;
-            }
-
-            .inner-circle {
-              width: 35px;
-              height: 35px;
-              border: 2px dashed #00ffff;
-              border-radius: 50%;
-              animation: spin 1.5s linear infinite;
-              box-shadow: 0 0 8px #00aaff;
-            }
-
-            @keyframes spin {
-              from {
-                transform: rotate(0deg);
+          if (data.active) {
+            var targetMin1 = Number(data.set_giai_doan.thoi_gian_chay) || 0;
+            if (stageTimer.stage !== 1) {
+              // Sườn lên: giai đoạn mới bắt đầu hoặc chuyển giai đoạn
+              if (stageTimer.stage != null) {
+                var prevEl = document.querySelector('.active_gia_doan_' + stageTimer.stage);
+                if (prevEl) prevEl.innerHTML = '';
               }
-              to {
-                transform: rotate(360deg);
-              }
+              stageTimer.stage = 1;
+              stageTimer.startMs = seedStartMsFromDoc(1);
+              stageTimer.targetMin = targetMin1;
+              // Sau lần seed đầu, xoá doc để tick sau dùng LIVE
+              currentRunningDoc = null;
+            } else {
+              // Cùng giai đoạn, chỉ cập nhật targetMin (phòng user đổi cài đặt)
+              stageTimer.targetMin = targetMin1;
             }
-            </style>`
-            : "";
-
-          // document.querySelector(".active_gia_doan_2").textContent = "";
-          // document.querySelector(".active_gia_doan_3").textContent = "";
-          // document.querySelector(".active_gia_doan_4").textContent = "";
+            renderDonut(1);
+            startDonutInterval();
+          } else {
+            if (stageTimer.stage === 1) {
+              stageTimer.stage = null;
+              stopDonutInterval();
+            }
+            document.querySelector(".active_gia_doan_1").innerHTML = "";
+          }
 
           document.querySelector(".thoi_gian_chay_hien_tai_1").textContent =
             data.set_giai_doan.thoi_gian_chay + " phút";
@@ -1682,47 +1773,29 @@
         if (data.giai_doan === "Giai đoạn: 2") {
           document.querySelector(".hien_thi_gia_doan_2").textContent =
             data.giai_doan;
-          document.querySelector(".active_gia_doan_2").innerHTML = data.active
-            ? `<div style="display:flex; justify-content:center; align-items:center; height:50px; ">
-              <div class="circle">
-                <div class="inner-circle"></div>
-              </div>
-            </div>
-
-            <style>
-            .circle {
-              width: 60px;
-              height: 60px;
-              border: 2px solid rgba(0, 150, 255, 0.2);
-              border-top: 2px solid #00aaff;
-              border-radius: 50%;
-              display: flex;
-              justify-content: center;
-              align-items: center;
-            }
-
-            .inner-circle {
-              width: 35px;
-              height: 35px;
-              border: 2px dashed #00ffff;
-              border-radius: 50%;
-              animation: spin 1.5s linear infinite;
-              box-shadow: 0 0 8px #00aaff;
-            }
-
-            @keyframes spin {
-              from {
-                transform: rotate(0deg);
+          if (data.active) {
+            var targetMin2 = Number(data.set_giai_doan.thoi_gian_chay) || 0;
+            if (stageTimer.stage !== 2) {
+              if (stageTimer.stage != null) {
+                var prevEl2 = document.querySelector('.active_gia_doan_' + stageTimer.stage);
+                if (prevEl2) prevEl2.innerHTML = '';
               }
-              to {
-                transform: rotate(360deg);
-              }
+              stageTimer.stage = 2;
+              stageTimer.startMs = seedStartMsFromDoc(2);
+              stageTimer.targetMin = targetMin2;
+              currentRunningDoc = null;
+            } else {
+              stageTimer.targetMin = targetMin2;
             }
-            </style>`
-            : "";
-          // document.querySelector(".active_gia_doan_1").textContent = "";
-          // document.querySelector(".active_gia_doan_3").textContent = "";
-          // document.querySelector(".active_gia_doan_4").textContent = "";
+            renderDonut(2);
+            startDonutInterval();
+          } else {
+            if (stageTimer.stage === 2) {
+              stageTimer.stage = null;
+              stopDonutInterval();
+            }
+            document.querySelector(".active_gia_doan_2").innerHTML = "";
+          }
 
           document.querySelector(".thoi_gian_chay_hien_tai_2").textContent =
             data.set_giai_doan.thoi_gian_chay + " phút";
@@ -1740,48 +1813,29 @@
         if (data.giai_doan === "Giai đoạn: 3") {
           document.querySelector(".hien_thi_gia_doan_3").textContent =
             data.giai_doan;
-          document.querySelector(".active_gia_doan_3").innerHTML = data.active
-            ? `<div style="display:flex; justify-content:center; align-items:center; height:50px; ">
-              <div class="circle">
-                <div class="inner-circle"></div>
-              </div>
-            </div>
-
-            <style>
-            .circle {
-              width: 60px;
-              height: 60px;
-              border: 2px solid rgba(0, 150, 255, 0.2);
-              border-top: 2px solid #00aaff;
-              border-radius: 50%;
-              display: flex;
-              justify-content: center;
-              align-items: center;
-            }
-
-            .inner-circle {
-              width: 35px;
-              height: 35px;
-              border: 2px dashed #00ffff;
-              border-radius: 50%;
-              animation: spin 1.5s linear infinite;
-              box-shadow: 0 0 8px #00aaff;
-            }
-
-            @keyframes spin {
-              from {
-                transform: rotate(0deg);
+          if (data.active) {
+            var targetMin3 = Number(data.set_giai_doan.thoi_gian_chay) || 0;
+            if (stageTimer.stage !== 3) {
+              if (stageTimer.stage != null) {
+                var prevEl3 = document.querySelector('.active_gia_doan_' + stageTimer.stage);
+                if (prevEl3) prevEl3.innerHTML = '';
               }
-              to {
-                transform: rotate(360deg);
-              }
+              stageTimer.stage = 3;
+              stageTimer.startMs = seedStartMsFromDoc(3);
+              stageTimer.targetMin = targetMin3;
+              currentRunningDoc = null;
+            } else {
+              stageTimer.targetMin = targetMin3;
             }
-            </style>`
-            : "";
-
-          // document.querySelector(".active_gia_doan_1").textContent = "";
-          // document.querySelector(".active_gia_doan_2").textContent = "";
-          // document.querySelector(".active_gia_doan_4").textContent = "";
+            renderDonut(3);
+            startDonutInterval();
+          } else {
+            if (stageTimer.stage === 3) {
+              stageTimer.stage = null;
+              stopDonutInterval();
+            }
+            document.querySelector(".active_gia_doan_3").innerHTML = "";
+          }
 
           document.querySelector(".thoi_gian_chay_hien_tai_3").textContent =
             data.set_giai_doan.thoi_gian_chay + " phút";
@@ -1799,48 +1853,29 @@
         if (data.giai_doan === "Giai đoạn: 4") {
           document.querySelector(".hien_thi_gia_doan_4").textContent =
             data.giai_doan;
-          document.querySelector(".active_gia_doan_4").innerHTML = data.active
-            ? `<div style="display:flex; justify-content:center; align-items:center; height:50px; ">
-              <div class="circle">
-                <div class="inner-circle"></div>
-              </div>
-            </div>
-
-            <style>
-            .circle {
-              width: 60px;
-              height: 60px;
-              border: 2px solid rgba(0, 150, 255, 0.2);
-              border-top: 2px solid #00aaff;
-              border-radius: 50%;
-              display: flex;
-              justify-content: center;
-              align-items: center;
-            }
-
-            .inner-circle {
-              width: 35px;
-              height: 35px;
-              border: 2px dashed #00ffff;
-              border-radius: 50%;
-              animation: spin 1.5s linear infinite;
-              box-shadow: 0 0 8px #00aaff;
-            }
-
-            @keyframes spin {
-              from {
-                transform: rotate(0deg);
+          if (data.active) {
+            var targetMin4 = Number(data.set_giai_doan.thoi_gian_treo_long) || 0;
+            if (stageTimer.stage !== 4) {
+              if (stageTimer.stage != null) {
+                var prevEl4 = document.querySelector('.active_gia_doan_' + stageTimer.stage);
+                if (prevEl4) prevEl4.innerHTML = '';
               }
-              to {
-                transform: rotate(360deg);
-              }
+              stageTimer.stage = 4;
+              stageTimer.startMs = seedStartMsFromDoc(4);
+              stageTimer.targetMin = targetMin4;
+              currentRunningDoc = null;
+            } else {
+              stageTimer.targetMin = targetMin4;
             }
-            </style>`
-            : "";
-
-          // document.querySelector(".active_gia_doan_1").textContent = "";
-          // document.querySelector(".active_gia_doan_2").textContent = "";
-          // document.querySelector(".active_gia_doan_3").textContent = "";
+            renderDonut(4);
+            startDonutInterval();
+          } else {
+            if (stageTimer.stage === 4) {
+              stageTimer.stage = null;
+              stopDonutInterval();
+            }
+            document.querySelector(".active_gia_doan_4").innerHTML = "";
+          }
 
           document.querySelector(
             ".thoi_gian_treo_long_hien_tai_4",
@@ -1875,7 +1910,7 @@
       // (không chờ socket). Dựng lại payload dạng socket từ document DB.
       function auto_load_noi_chien(n) {
         const soN = String(n);
-        fetch(`http://localhost:3000/get_noi_chien?so_noiChien=${Number(n)}`)
+        fetch(`/get_noi_chien?so_noiChien=${Number(n)}`)
           .then((res) => res.json())
           .then((documents) => {
             if (!Array.isArray(documents)) return;
@@ -1886,11 +1921,17 @@
               reset_realTimer_he_chien(soN, data_reset);
               return;
             }
-            // 2) Chọn mẻ đang chạy (chưa stop), nếu không có thì lấy mẻ mới nhất
-            const running = documents.find(
-              (d) => d.thoi_gian_stop === "" || d.thoi_gian_stop == null,
-            );
+            // 2) Chọn mẻ đang chạy MỚI NHẤT (duyệt ngược), nếu không có thì lấy mẻ mới nhất
+            var running = null;
+            for (var i = documents.length - 1; i >= 0; i--) {
+              if (documents[i].thoi_gian_stop === "" || documents[i].thoi_gian_stop == null) {
+                running = documents[i];
+                break;
+              }
+            }
             const doc = running || documents[documents.length - 1];
+            // Lưu doc đang chạy để seed startMs cho donut khi socket tick đầu tiên đến
+            currentRunningDoc = running ? running : null;
 
             const ZERO = {
               ap_suat_vo_hoi: 0,
@@ -1952,8 +1993,6 @@
       });
 
       socket.on("noi_chien_2_data", (data) => {
-        console.log(data);
-
         if (so_noiChien === "2") realTimer_he_chien(so_noiChien, data);
       });
       socket.on("noi_chien_2_stop", (data) => {
