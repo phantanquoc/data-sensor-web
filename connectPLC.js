@@ -1,6 +1,12 @@
 const ModbusRTU = require("modbus-serial");
 require("dotenv").config();
 
+const DEBUG = process.env.DEBUG === "true" || process.env.DEBUG === "1";
+function dbg(...args) { if (DEBUG) console.log(...args); }
+
+const MODBUS_TIMEOUT_MS = 1000;
+const CLOSE_TIMEOUT_MS = 2000;
+
 // Array of 8 Modbus connections and their status flags, indexed 1..8
 // plcConnections[1]..plcConnections[8] are the ModbusRTU instances
 // isConnected[1]..isConnected[8] are the boolean status flags
@@ -18,11 +24,24 @@ for (let n = 1; n <= 8; n++) {
 async function connect(n) {
   const ipEnv = "IP_PLC" + n;
   try {
+    // Đóng socket cũ nếu còn mở, tránh EISCONN khi reconnect
+    try {
+      if (plcConnections[n].isOpen) {
+        await Promise.race([
+          new Promise((resolve) => plcConnections[n].close(resolve)),
+          new Promise((resolve) => setTimeout(resolve, CLOSE_TIMEOUT_MS)),
+        ]);
+      }
+    } catch (e) {
+      // đóng socket cũ lỗi thì bỏ qua, không chặn kết nối mới
+    }
+
     await plcConnections[n].connectTCP(process.env[ipEnv], {
       port: process.env.PORT_PLC,
     });
     plcConnections[n].setID(1);
-    console.log("Kết nối thành công");
+    plcConnections[n].setTimeout(MODBUS_TIMEOUT_MS);
+    dbg("Kết nối thành công");
     isConnected[n] = true;
     return plcConnections[n];
   } catch (err) {

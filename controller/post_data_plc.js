@@ -1,8 +1,17 @@
 const { Buffer } = require("buffer");
 
+const DEBUG = process.env.DEBUG === "true" || process.env.DEBUG === "1";
+function dbg(...args) { if (DEBUG) console.log(...args); }
+
 // id_document keyed by fryer index (n = 1..8), module-scoped in memory
 // Behavior including loss on restart is unchanged.
 const id_document = {};
+
+const PUSH_EVERY_N_CYCLES = 5;   // K: mỗi 5 chu kỳ mới $push 1 điểm vào bien_du_lieu
+const pushCount = {};            // pushCount[n] = {1,2,3,4} đếm số chu kỳ active mỗi giai đoạn
+
+// Cache latest stagesArray per fryer for instant snapshot on client join
+const latestStages = {};
 
 /**
  * postDataPlc - single parameterized function replacing the 8 post_data_to_db_* files.
@@ -331,162 +340,162 @@ exports.postDataPlc = async (
     const docunent = await model.create(dataFormat).catch((err) => {
       console.log(err);
     });
-    if (docunent) id_document[n] = docunent._id;
+    if (docunent) {
+      id_document[n] = docunent._id;
+      pushCount[n] = { 1: 0, 2: 0, 3: 0, 4: 0 };
+    }
   }
   // update
   if (Start > 1) {
     //giai đoạn 1
     if (giai_doan_1 && typeof giai_doan_1 === "boolean") {
-      const document = await model.findByIdAndUpdate(
-        id_document[n],
-        {
+      if (!pushCount[n]) pushCount[n] = { 1: 0, 2: 0, 3: 0, 4: 0 };
+      pushCount[n][1]++;
+      const update_1 = {
+        $set: {
           tong_thoi_gian_chay: d60,
-          $set: {
-            "giai_doan_1.thoi_gian_chay": thoi_gian_chay_gd1,
-            "giai_doan_1.so_lan_nhung": so_lan_nhung_gd1,
-            "giai_doan_1.thoi_gian_nhung": thoi_gian_nhung_gd1,
-            "giai_doan_1.thoi_gian_lap_lai": thoi_gian_lap_lai_gd1,
-            "giai_doan_1.nhiet_do_cai_dat": nhiet_do_cai_dat_gd1,
-            "giai_doan_1.vi_tri_dung": vi_tri_muc_dau_gd_1,
-          },
-          $push: {
-            "giai_doan_1.bien_du_lieu": newData_gd_1,
-          },
+          "giai_doan_1.thoi_gian_chay": thoi_gian_chay_gd1,
+          "giai_doan_1.so_lan_nhung": so_lan_nhung_gd1,
+          "giai_doan_1.thoi_gian_nhung": thoi_gian_nhung_gd1,
+          "giai_doan_1.thoi_gian_lap_lai": thoi_gian_lap_lai_gd1,
+          "giai_doan_1.nhiet_do_cai_dat": nhiet_do_cai_dat_gd1,
+          "giai_doan_1.vi_tri_dung": vi_tri_muc_dau_gd_1,
         },
-        { new: true },
-      );
-      console.log("nồi chiên " + n + " giai đoạn 1");
+      };
+      if (pushCount[n][1] % PUSH_EVERY_N_CYCLES === 1) {
+        update_1.$push = { "giai_doan_1.bien_du_lieu": newData_gd_1 };
+      }
+      await model.updateOne({ _id: id_document[n] }, update_1);
+      dbg("nồi chiên " + n + " giai đoạn 1");
     }
     // giai đoạn 2
     if (giai_doan_2 && typeof giai_doan_2 === "boolean") {
-      const document = await model.findByIdAndUpdate(
-        id_document[n],
-        {
+      if (!pushCount[n]) pushCount[n] = { 1: 0, 2: 0, 3: 0, 4: 0 };
+      pushCount[n][2]++;
+      const update_2 = {
+        $set: {
           tong_thoi_gian_chay: d60,
-          $set: {
-            "giai_doan_2.thoi_gian_chay": thoi_gian_chay_gd2,
-            "giai_doan_2.so_lan_nhung": so_lan_nhung_gd2,
-            "giai_doan_2.thoi_gian_nhung": thoi_gian_nhung_gd2,
-            "giai_doan_2.thoi_gian_lap_lai": thoi_gian_lap_lai_gd2,
-            "giai_doan_2.nhiet_do_cai_dat": nhiet_do_cai_dat_gd2,
-            "giai_doan_2.vi_tri_dung": vi_tri_muc_dau_gd_2,
-          },
-          $push: {
-            "giai_doan_2.bien_du_lieu": newData_gd_2,
-          },
+          "giai_doan_2.thoi_gian_chay": thoi_gian_chay_gd2,
+          "giai_doan_2.so_lan_nhung": so_lan_nhung_gd2,
+          "giai_doan_2.thoi_gian_nhung": thoi_gian_nhung_gd2,
+          "giai_doan_2.thoi_gian_lap_lai": thoi_gian_lap_lai_gd2,
+          "giai_doan_2.nhiet_do_cai_dat": nhiet_do_cai_dat_gd2,
+          "giai_doan_2.vi_tri_dung": vi_tri_muc_dau_gd_2,
         },
-        { new: true },
-      );
-      console.log("nồi chiên " + n + " giai đoạn 2");
+      };
+      if (pushCount[n][2] % PUSH_EVERY_N_CYCLES === 1) {
+        update_2.$push = { "giai_doan_2.bien_du_lieu": newData_gd_2 };
+      }
+      await model.updateOne({ _id: id_document[n] }, update_2);
+      dbg("nồi chiên " + n + " giai đoạn 2");
     }
     //giai đoạn 3
     if (giai_doan_3 && typeof giai_doan_3 === "boolean") {
-      const document = await model.findByIdAndUpdate(
-        id_document[n],
-        {
+      if (!pushCount[n]) pushCount[n] = { 1: 0, 2: 0, 3: 0, 4: 0 };
+      pushCount[n][3]++;
+      const update_3 = {
+        $set: {
           tong_thoi_gian_chay: d60,
-          $set: {
-            "giai_doan_3.thoi_gian_chay": thoi_gian_chay_gd3,
-            "giai_doan_3.so_lan_nhung": so_lan_nhung_gd3,
-            "giai_doan_3.thoi_gian_nhung": thoi_gian_nhung_gd3,
-            "giai_doan_3.thoi_gian_lap_lai": thoi_gian_lap_lai_gd3,
-            "giai_doan_3.nhiet_do_cai_dat": nhiet_do_cai_dat_gd3,
-            "giai_doan_3.vi_tri_dung": vi_tri_muc_dau_gd_3,
-          },
-          $push: {
-            "giai_doan_3.bien_du_lieu": newData_gd_3,
-          },
+          "giai_doan_3.thoi_gian_chay": thoi_gian_chay_gd3,
+          "giai_doan_3.so_lan_nhung": so_lan_nhung_gd3,
+          "giai_doan_3.thoi_gian_nhung": thoi_gian_nhung_gd3,
+          "giai_doan_3.thoi_gian_lap_lai": thoi_gian_lap_lai_gd3,
+          "giai_doan_3.nhiet_do_cai_dat": nhiet_do_cai_dat_gd3,
+          "giai_doan_3.vi_tri_dung": vi_tri_muc_dau_gd_3,
         },
-        { new: true },
-      );
-      console.log("nồi chiên " + n + " giai đoạn: 3");
+      };
+      if (pushCount[n][3] % PUSH_EVERY_N_CYCLES === 1) {
+        update_3.$push = { "giai_doan_3.bien_du_lieu": newData_gd_3 };
+      }
+      await model.updateOne({ _id: id_document[n] }, update_3);
+      dbg("nồi chiên " + n + " giai đoạn: 3");
     }
     //giai đoạn 4
     if (giai_doan_4 && typeof giai_doan_4 === "boolean") {
-      const document = await model.findByIdAndUpdate(
-        id_document[n],
-        {
+      if (!pushCount[n]) pushCount[n] = { 1: 0, 2: 0, 3: 0, 4: 0 };
+      pushCount[n][4]++;
+      const update_4 = {
+        $set: {
           tong_thoi_gian_chay: d60,
-          $set: {
-            "giai_doan_4.thoi_gian_treo_long": thoi_gian_treo_long_gd4,
-          },
-          $push: {
-            "giai_doan_4.bien_du_lieu": newData_gd_4,
-          },
+          "giai_doan_4.thoi_gian_treo_long": thoi_gian_treo_long_gd4,
         },
-        { new: true },
-      );
-      console.log("nồi chiên " + n + " giai đoạn 4");
+      };
+      if (pushCount[n][4] % PUSH_EVERY_N_CYCLES === 1) {
+        update_4.$push = { "giai_doan_4.bien_du_lieu": newData_gd_4 };
+      }
+      await model.updateOne({ _id: id_document[n] }, update_4);
+      dbg("nồi chiên " + n + " giai đoạn 4");
     }
   }
 
   // update stop
   if (Start === 0) {
-    const document = await model.findByIdAndUpdate(
-      id_document[n],
-      {
-        thoi_gian_stop: new Date().toLocaleString("vi-VN"),
-      },
-      { new: true },
+    await model.updateOne(
+      { _id: id_document[n] },
+      { $set: { thoi_gian_stop: new Date().toLocaleString("vi-VN") } },
     );
-    console.log(document);
-    io_.emit("noi_chien_" + n + "_stop", {
+    console.log("nồi chiên " + n + " đã stop mẻ");
+    io_.to("noi_" + n).emit("noi_chien_" + n + "_stop", {
       stop: "đã hoang thành xong mẽ chiên",
     });
   }
 
-  io_.emit("noi_chien_" + n + "_data", {
-    data: newData_gd_1,
-    giai_doan: "Giai đoạn: 1",
-    active: giai_doan_1 && typeof giai_doan_1 === "boolean" ? true : false,
-    tong_thoi_gian_chay: d60,
-    set_giai_doan: {
-      thoi_gian_chay: thoi_gian_chay_gd1,
-      so_lan_nhung: so_lan_nhung_gd1,
-      thoi_gian_nhung: thoi_gian_nhung_gd1,
-      thoi_gian_lap_lai: thoi_gian_lap_lai_gd1,
-      nhiet_do_cai_dat: nhiet_do_cai_dat_gd1,
-      vi_tri_muc_dau: vi_tri_muc_dau_gd_1,
+  // Consolidated emit: single event with 4-stage array, room-scoped
+  const stagesArray = [
+    {
+      data: newData_gd_1,
+      giai_doan: "Giai đoạn: 1",
+      active: giai_doan_1 && typeof giai_doan_1 === "boolean" ? true : false,
+      tong_thoi_gian_chay: d60,
+      set_giai_doan: {
+        thoi_gian_chay: thoi_gian_chay_gd1,
+        so_lan_nhung: so_lan_nhung_gd1,
+        thoi_gian_nhung: thoi_gian_nhung_gd1,
+        thoi_gian_lap_lai: thoi_gian_lap_lai_gd1,
+        nhiet_do_cai_dat: nhiet_do_cai_dat_gd1,
+        vi_tri_muc_dau: vi_tri_muc_dau_gd_1,
+      },
     },
-  });
-
-  io_.emit("noi_chien_" + n + "_data", {
-    data: newData_gd_2,
-    giai_doan: "Giai đoạn: 2",
-    active: giai_doan_2 && typeof giai_doan_2 === "boolean" ? true : false,
-    tong_thoi_gian_chay: d60,
-    set_giai_doan: {
-      thoi_gian_chay: thoi_gian_chay_gd2,
-      so_lan_nhung: so_lan_nhung_gd2,
-      thoi_gian_nhung: thoi_gian_nhung_gd2,
-      thoi_gian_lap_lai: thoi_gian_lap_lai_gd2,
-      nhiet_do_cai_dat: nhiet_do_cai_dat_gd2,
-      vi_tri_muc_dau: vi_tri_muc_dau_gd_2,
+    {
+      data: newData_gd_2,
+      giai_doan: "Giai đoạn: 2",
+      active: giai_doan_2 && typeof giai_doan_2 === "boolean" ? true : false,
+      tong_thoi_gian_chay: d60,
+      set_giai_doan: {
+        thoi_gian_chay: thoi_gian_chay_gd2,
+        so_lan_nhung: so_lan_nhung_gd2,
+        thoi_gian_nhung: thoi_gian_nhung_gd2,
+        thoi_gian_lap_lai: thoi_gian_lap_lai_gd2,
+        nhiet_do_cai_dat: nhiet_do_cai_dat_gd2,
+        vi_tri_muc_dau: vi_tri_muc_dau_gd_2,
+      },
     },
-  });
-
-  io_.emit("noi_chien_" + n + "_data", {
-    data: newData_gd_3,
-    giai_doan: "Giai đoạn: 3",
-    active: giai_doan_3 && typeof giai_doan_3 === "boolean" ? true : false,
-    tong_thoi_gian_chay: d60,
-    set_giai_doan: {
-      thoi_gian_chay: thoi_gian_chay_gd3,
-      so_lan_nhung: so_lan_nhung_gd3,
-      thoi_gian_nhung: thoi_gian_nhung_gd3,
-      thoi_gian_lap_lai: thoi_gian_lap_lai_gd3,
-      nhiet_do_cai_dat: nhiet_do_cai_dat_gd3,
-      vi_tri_muc_dau: vi_tri_muc_dau_gd_3,
+    {
+      data: newData_gd_3,
+      giai_doan: "Giai đoạn: 3",
+      active: giai_doan_3 && typeof giai_doan_3 === "boolean" ? true : false,
+      tong_thoi_gian_chay: d60,
+      set_giai_doan: {
+        thoi_gian_chay: thoi_gian_chay_gd3,
+        so_lan_nhung: so_lan_nhung_gd3,
+        thoi_gian_nhung: thoi_gian_nhung_gd3,
+        thoi_gian_lap_lai: thoi_gian_lap_lai_gd3,
+        nhiet_do_cai_dat: nhiet_do_cai_dat_gd3,
+        vi_tri_muc_dau: vi_tri_muc_dau_gd_3,
+      },
     },
-  });
-
-  io_.emit("noi_chien_" + n + "_data", {
-    data: newData_gd_4,
-    giai_doan: "Giai đoạn: 4",
-    active: giai_doan_4 && typeof giai_doan_4 === "boolean" ? true : false,
-    tong_thoi_gian_chay: d60,
-    set_giai_doan: {
-      thoi_gian_treo_long: thoi_gian_treo_long_gd4,
+    {
+      data: newData_gd_4,
+      giai_doan: "Giai đoạn: 4",
+      active: giai_doan_4 && typeof giai_doan_4 === "boolean" ? true : false,
+      tong_thoi_gian_chay: d60,
+      set_giai_doan: {
+        thoi_gian_treo_long: thoi_gian_treo_long_gd4,
+      },
     },
-  });
+  ];
+  latestStages[n] = stagesArray;
+  io_.to("noi_" + n).emit("noi_chien_" + n + "_data", stagesArray);
 };
+
+exports.getLatestStages = (n) => latestStages[n];

@@ -1007,7 +1007,7 @@
           .then((data) => {
             render(data);
             //-------giai đoạn 1--------
-            if (data.giai_doan_1.bien_du_lieu.length > 0) {
+            if (data.giai_doan_1.bien_du_lieu.length > 1) {
               let thoi_gian_chay_gd1 = 0;
               let ap_suat_chan_khong_gd1 = 0;
               let ap_suat_vo_hoi_gd1 = 0;
@@ -1082,7 +1082,7 @@
               ).toFixed(2);
             }
             //-----giai đoạn 2--------
-            if (data.giai_doan_2.bien_du_lieu.length > 0) {
+            if (data.giai_doan_2.bien_du_lieu.length > 1) {
               let ap_suat_chan_khong_gd2 = 0;
               let ap_suat_vo_hoi_gd2 = 0;
               let ap_suat_vong_nuoc_gd2 = 0;
@@ -1164,7 +1164,7 @@
               ).toFixed(2);
             }
             //--------giai đoạn 3---------
-            if (data.giai_doan_3.bien_du_lieu.length > 0) {
+            if (data.giai_doan_3.bien_du_lieu.length > 1) {
               let ap_suat_chan_khong_gd3 = 0;
               let ap_suat_vo_hoi_gd3 = 0;
               let ap_suat_vong_nuoc_gd3 = 0;
@@ -1246,7 +1246,7 @@
               ).toFixed(2);
             }
             //-------giai đoạn 4-----------
-            if (data.giai_doan_4.bien_du_lieu.length > 0) {
+            if (data.giai_doan_4.bien_du_lieu.length > 1) {
               let ap_suat_chan_khong_gd4 = 0;
               let ap_suat_vo_hoi_gd4 = 0;
               let ap_suat_vong_nuoc_gd4 = 0;
@@ -1705,7 +1705,8 @@
             default:
               break;
           }
-          // Sau khi đổi tab: tự nạp danh sách mẻ + giá trị realtime của nồi vừa chọn
+          // Sau khi đổi tab: join room mới và tự nạp danh sách mẻ + giá trị realtime của nồi vừa chọn
+          socket.emit("join_noi", so_noiChien);
           auto_load_noi_chien(so_noiChien);
         });
       });
@@ -1713,6 +1714,7 @@
       const socket = io();
       socket.on("connect", () => {
         console.log("Connected:", socket.id);
+        socket.emit("join_noi", so_noiChien);
       });
       socket.on("message", (data) => {
         console.log(data);
@@ -1914,7 +1916,7 @@
           .then((res) => res.json())
           .then((documents) => {
             if (!Array.isArray(documents)) return;
-            // 1) Nạp danh sách mẻ chiên vào bảng
+            // 1) Nạp danh sách mẻ chiên vào bảng (list nhẹ, chỉ có _id/thoi_gian_start/thoi_gian_stop/dong_ep_khoi_dong)
             loadDocuments(documents);
             if (documents.length === 0) {
               // Không có mẻ nào → giữ trạng thái reset (0)
@@ -1929,138 +1931,87 @@
                 break;
               }
             }
-            const doc = running || documents[documents.length - 1];
-            // Lưu doc đang chạy để seed startMs cho donut khi socket tick đầu tiên đến
-            currentRunningDoc = running ? running : null;
+            const chosen = running || documents[documents.length - 1];
+            // 3) Fetch full document của mẻ được chọn để dựng realtime
+            fetch(`/get_noi_chien_detail?id=${chosen._id}&so_noiChien=${Number(n)}`)
+              .then((res2) => res2.json())
+              .then((fullDoc) => {
+                // Lưu doc đang chạy để seed startMs cho donut khi socket tick đầu tiên đến
+                currentRunningDoc = running ? fullDoc : null;
 
-            const ZERO = {
-              ap_suat_vo_hoi: 0,
-              ap_suat_chan_khong: 0,
-              ap_suat_vong_nuoc: 0,
-              nhiet_do: 0,
-              dong_dien_dong_co_root: 0,
-              dong_dien_dong_co_vong_nuoc: 0,
-              nhiet_do_vao_binh_sinh_han: 0,
-              nhiet_do_ra_binh_sinh_han: 0,
-              nhiet_do_vao_bom_vong_nuoc: 0,
-              nhiet_do_ra_bom_vong_nuoc: 0,
-            };
-            const lastOf = (gd) =>
-              gd && Array.isArray(gd.bien_du_lieu) && gd.bien_du_lieu.length
-                ? gd.bien_du_lieu[gd.bien_du_lieu.length - 1]
-                : ZERO;
+                const ZERO = {
+                  ap_suat_vo_hoi: 0,
+                  ap_suat_chan_khong: 0,
+                  ap_suat_vong_nuoc: 0,
+                  nhiet_do: 0,
+                  dong_dien_dong_co_root: 0,
+                  dong_dien_dong_co_vong_nuoc: 0,
+                  nhiet_do_vao_binh_sinh_han: 0,
+                  nhiet_do_ra_binh_sinh_han: 0,
+                  nhiet_do_vao_bom_vong_nuoc: 0,
+                  nhiet_do_ra_bom_vong_nuoc: 0,
+                };
+                const lastOf = (gd) =>
+                  gd && Array.isArray(gd.bien_du_lieu) && gd.bien_du_lieu.length
+                    ? gd.bien_du_lieu[gd.bien_du_lieu.length - 1]
+                    : ZERO;
 
-            // 3) Dựng lại 4 payload giai đoạn (thứ tự 1→4 giống backend emit)
-            for (let g = 1; g <= 3; g++) {
-              const gd = doc["giai_doan_" + g] || {};
-              realTimer_he_chien(soN, {
-                data: lastOf(gd),
-                giai_doan: "Giai đoạn: " + g,
-                active: false,
-                tong_thoi_gian_chay: doc.tong_thoi_gian_chay,
-                set_giai_doan: {
-                  thoi_gian_chay: gd.thoi_gian_chay,
-                  so_lan_nhung: gd.so_lan_nhung,
-                  thoi_gian_nhung: gd.thoi_gian_nhung,
-                  thoi_gian_lap_lai: gd.thoi_gian_lap_lai,
-                  nhiet_do_cai_dat: gd.nhiet_do_cai_dat,
-                  vi_tri_muc_dau: gd.vi_tri_dung,
-                },
+                // 4) Dựng lại 4 payload giai đoạn (thứ tự 1→4 giống backend emit)
+                for (let g = 1; g <= 3; g++) {
+                  const gd = fullDoc["giai_doan_" + g] || {};
+                  realTimer_he_chien(soN, {
+                    data: lastOf(gd),
+                    giai_doan: "Giai đoạn: " + g,
+                    active: false,
+                    tong_thoi_gian_chay: fullDoc.tong_thoi_gian_chay,
+                    set_giai_doan: {
+                      thoi_gian_chay: gd.thoi_gian_chay,
+                      so_lan_nhung: gd.so_lan_nhung,
+                      thoi_gian_nhung: gd.thoi_gian_nhung,
+                      thoi_gian_lap_lai: gd.thoi_gian_lap_lai,
+                      nhiet_do_cai_dat: gd.nhiet_do_cai_dat,
+                      vi_tri_muc_dau: gd.vi_tri_dung,
+                    },
+                  });
+                }
+                const gd4 = fullDoc.giai_doan_4 || {};
+                realTimer_he_chien(soN, {
+                  data: lastOf(gd4),
+                  giai_doan: "Giai đoạn: 4",
+                  active: false,
+                  tong_thoi_gian_chay: fullDoc.tong_thoi_gian_chay,
+                  set_giai_doan: {
+                    thoi_gian_treo_long: gd4.thoi_gian_treo_long,
+                  },
+                });
+              })
+              .catch((err) => {
+                // Detail fetch lỗi → giữ bảng list đã render, reset vùng realtime về 0
+                console.log("auto_load detail error:", err);
+                reset_realTimer_he_chien(soN, data_reset);
               });
-            }
-            const gd4 = doc.giai_doan_4 || {};
-            realTimer_he_chien(soN, {
-              data: lastOf(gd4),
-              giai_doan: "Giai đoạn: 4",
-              active: false,
-              tong_thoi_gian_chay: doc.tong_thoi_gian_chay,
-              set_giai_doan: {
-                thoi_gian_treo_long: gd4.thoi_gian_treo_long,
-              },
-            });
           })
           .catch((err) => console.log("auto_load_noi_chien error:", err));
       }
 
-      socket.on("noi_chien_1_data", (data) => {
-        if (so_noiChien === "1") realTimer_he_chien(so_noiChien, data);
-      });
-      socket.on("noi_chien_1_stop", (data) => {
-        if (so_noiChien === "1") {
-          alert("Đã hoàn thanh mẻ hệ chiên 1");
-          reset_realTimer_he_chien(so_noiChien, data_reset);
-        }
-      });
-
-      socket.on("noi_chien_2_data", (data) => {
-        if (so_noiChien === "2") realTimer_he_chien(so_noiChien, data);
-      });
-      socket.on("noi_chien_2_stop", (data) => {
-        if (so_noiChien === "2") {
-          alert("Đã hoàn thanh mẻ hệ chiên 2");
-          reset_realTimer_he_chien(so_noiChien, data_reset);
-        }
-      });
-
-      socket.on("noi_chien_3_data", (data) => {
-        if (so_noiChien === "3") realTimer_he_chien(so_noiChien, data);
-      });
-      socket.on("noi_chien_3_stop", (data) => {
-        if (so_noiChien === "3") {
-          alert("Đã hoàn thanh mẻ hệ chiên 3");
-          reset_realTimer_he_chien(so_noiChien, data_reset);
-        }
-      });
-
-      socket.on("noi_chien_4_data", (data) => {
-        if (so_noiChien === "4") realTimer_he_chien(so_noiChien, data);
-      });
-      socket.on("noi_chien_4_stop", (data) => {
-        if (so_noiChien === "4") {
-          alert("Đã hoàn thanh mẻ hệ chiên 4");
-          reset_realTimer_he_chien(so_noiChien, data_reset);
-        }
-      });
-
-      socket.on("noi_chien_5_data", (data) => {
-        if (so_noiChien === "5") realTimer_he_chien(so_noiChien, data);
-      });
-      socket.on("noi_chien_5_stop", (data) => {
-        if (so_noiChien === "5") {
-          alert("Đã hoàn thanh mẻ hệ chiên 5");
-          reset_realTimer_he_chien(so_noiChien, data_reset);
-        }
-      });
-
-      socket.on("noi_chien_6_data", (data) => {
-        if (so_noiChien === "6") realTimer_he_chien(so_noiChien, data);
-      });
-      socket.on("noi_chien_6_stop", (data) => {
-        if (so_noiChien === "6") {
-          alert("Đã hoàn thanh mẻ hệ chiên 6");
-          reset_realTimer_he_chien(so_noiChien, data_reset);
-        }
-      });
-
-      socket.on("noi_chien_7_data", (data) => {
-        if (so_noiChien === "7") realTimer_he_chien(so_noiChien, data);
-      });
-      socket.on("noi_chien_7_stop", (data) => {
-        if (so_noiChien === "7") {
-          alert("Đã hoàn thanh mẻ hệ chiên 7");
-          reset_realTimer_he_chien(so_noiChien, data_reset);
-        }
-      });
-
-      socket.on("noi_chien_8_data", (data) => {
-        if (so_noiChien === "8") realTimer_he_chien(so_noiChien, data);
-      });
-      socket.on("noi_chien_8_stop", (data) => {
-        if (so_noiChien === "8") {
-          alert("Đã hoàn thanh mẻ hệ chiên 8");
-          reset_realTimer_he_chien(so_noiChien, data_reset);
-        }
-      });
+      // Consolidated socket handlers: one data + one stop handler per fryer
+      for (let _n = 1; _n <= 8; _n++) {
+        (function(fryer) {
+          socket.on("noi_chien_" + fryer + "_data", (stagesArray) => {
+            if (so_noiChien === String(fryer)) {
+              for (let i = 0; i < stagesArray.length; i++) {
+                realTimer_he_chien(so_noiChien, stagesArray[i]);
+              }
+            }
+          });
+          socket.on("noi_chien_" + fryer + "_stop", (data) => {
+            if (so_noiChien === String(fryer)) {
+              alert("Đã hoàn thanh mẻ hệ chiên " + fryer);
+              reset_realTimer_he_chien(so_noiChien, data_reset);
+            }
+          });
+        })(_n);
+      }
       // ----------------------------------------
 
       const app = document.getElementById("app");

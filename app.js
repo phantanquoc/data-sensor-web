@@ -7,6 +7,9 @@ app.use(cors());
 const path = require("path");
 require("dotenv").config();
 
+const DEBUG = process.env.DEBUG === "true" || process.env.DEBUG === "1";
+function dbg(...args) { if (DEBUG) console.log(...args); }
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 // Cấu hình thư mục 'public' làm nơi chứa file tĩnh
@@ -48,6 +51,20 @@ function startServer() {
         console.log("Client connected:", socket.id);
         socket.emit("message", {
           text: "Connected successfully",
+        });
+        socket.on("join_noi", (n) => {
+          // Leave any previous noi_* rooms
+          for (const room of socket.rooms) {
+            if (room.startsWith("noi_") && room !== socket.id) {
+              socket.leave(room);
+            }
+          }
+          socket.join("noi_" + n);
+          // Emit cached snapshot immediately so client doesn't wait for next read cycle
+          const snap = getLatestStages(n);
+          if (snap) {
+            socket.emit("noi_chien_" + n + "_data", snap);
+          }
         });
         socket.on("disconnect", () => {
           console.log("Client disconnected:", socket.id);
@@ -113,7 +130,7 @@ connectMongo();
 // ======================
 const { plcConnections, connect, getStatus, updateStatus } = require("./connectPLC");
 const plcModels = require("./model/plc_schema");
-const { postDataPlc } = require("./controller/post_data_plc");
+const { postDataPlc, getLatestStages } = require("./controller/post_data_plc");
 const { Buffer } = require("buffer");
 
 // Dọn mẻ mồ côi (mẻ chưa stop) khi khởi động lại hệ thống
@@ -227,41 +244,143 @@ for (let n = 1; n <= 8; n++) {
 const Start = {};
 const isStart = {};
 const timerOut_else = {};
+const isReading = {};
+const prevConnected = {};
+const lastConfigRead = {}; // mốc thời gian (ms) lần cuối đọc block config
+const needConfigRead = {}; // cờ ép đọc config ở cycle tới (kết nối lại / sườn lên M120)
 for (let n = 1; n <= 8; n++) {
   Start[n] = 0;
   isStart[n] = false;
   timerOut_else[n] = null;
+  isReading[n] = false;
+  prevConnected[n] = null;
+  lastConfigRead[n] = 0;
+  needConfigRead[n] = true; // đọc config ngay ở cycle đầu tiên
 }
 
-// readAllRegisters — defined ONCE, parameterized by fryer config
-async function readAllRegisters(cfg) {
+// Chu kỳ làm mới config định kỳ (phương án C): 60s
+const CONFIG_REFRESH_MS = 60000;
+
+// Block definitions for grouped Modbus reads — [startAddress, count]
+//
+// REALTIME: 10 cảm biến + tổng thời gian + trạng thái giai đoạn → đọc MỖI cycle.
+//   holding [2,4]=D2..D5, [60,1]=D60(tổng t/g), [81,7]=D81..D87,
+//           [134,2]=D134/135, [572,6]=D571..D576(dòng điện)
+//   coil    [15070,86]=M70,M120,M124,M126,M127,M155
+const REALTIME_HOLDING_BLOCKS = [
+  [2, 4],
+  [60, 1],
+  [81, 7],
+  [134, 2],
+  [572, 6],
+];
+const REALTIME_COIL_BLOCKS = [
+  [15070, 86],
+];
+
+// CONFIG: thông số cài đặt từng giai đoạn (ít khi đổi) → đọc theo nhịp C (đầu mẻ + 60s).
+//   [202,13]=gd2, [256,13]=gd1/3, [316,1]=gd1, [501,10]=gd1/2/3 setpoint+vị trí
+const CONFIG_HOLDING_BLOCKS = [
+  [202, 13],
+  [256, 13],
+  [316, 1],
+  [501, 10],
+];
+// (X0 [16000,1] đã bỏ — không được tiêu thụ ở backend/frontend)
+
+// Đọc 1 nhóm holding-block tuần tự (một request tại một thời điểm / kết nối).
+// Split response.data[addr-start] vào reg.val theo địa chỉ Modbus (bảo toàn offset +1).
+// Per-block fallback: block lỗi thì đọc lẻ từng thanh ghi, không ảnh hưởng block khác.
+async function readHoldingBlocks(cfg, blocks) {
   const n = cfg.index;
   const conn = plcConnections[n];
-
-  // Read all registers for this fryer
-  const tasks = cfg.registerList.map(async (reg) => {
+  for (const [start, count] of blocks) {
     try {
-      if (reg.dataType === "reg") {
-        const response = await conn.readHoldingRegisters(reg.modbusAddr, 1);
-        reg.val = response.data[0];
-      }
-      if (reg.dataType === "coil") {
-        const response = await conn.readCoils(reg.modbusAddr, 1);
-        reg.val = response.data[0];
+      const response = await conn.readHoldingRegisters(start, count);
+      for (const reg of cfg.registerList) {
+        if (reg.dataType === "reg" && reg.modbusAddr >= start && reg.modbusAddr < start + count) {
+          reg.val = response.data[reg.modbusAddr - start];
+        }
       }
     } catch (err) {
-      reg.val = 0;
-      updateStatus(n, false);
+      for (const reg of cfg.registerList) {
+        if (reg.dataType === "reg" && reg.modbusAddr >= start && reg.modbusAddr < start + count) {
+          try {
+            const response = await conn.readHoldingRegisters(reg.modbusAddr, 1);
+            reg.val = response.data[0];
+          } catch (err2) {
+            reg.val = 0;
+            updateStatus(n, false);
+          }
+        }
+      }
     }
-  });
-  await Promise.all(tasks);
-  console.log("Tất cả đã hoàn tất");
+  }
+}
+
+// Đọc 1 nhóm coil-block tuần tự (cùng nguyên tắc split + fallback như holding).
+async function readCoilBlocks(cfg, blocks) {
+  const n = cfg.index;
+  const conn = plcConnections[n];
+  for (const [start, count] of blocks) {
+    try {
+      const response = await conn.readCoils(start, count);
+      for (const reg of cfg.registerList) {
+        if (reg.dataType === "coil" && reg.modbusAddr >= start && reg.modbusAddr < start + count) {
+          reg.val = response.data[reg.modbusAddr - start];
+        }
+      }
+    } catch (err) {
+      for (const reg of cfg.registerList) {
+        if (reg.dataType === "coil" && reg.modbusAddr >= start && reg.modbusAddr < start + count) {
+          try {
+            const response = await conn.readCoils(reg.modbusAddr, 1);
+            reg.val = response.data[0];
+          } catch (err2) {
+            reg.val = 0;
+            updateStatus(n, false);
+          }
+        }
+      }
+    }
+  }
+}
+
+// readAllRegisters — defined ONCE, parameterized by fryer config.
+// Vòng nóng: luôn đọc block REALTIME (6 rq/nồi: 5 holding + 1 coil).
+// Vòng nguội: đọc block CONFIG (4 rq) theo phương án C — khi (tái) kết nối,
+// khi bắt đầu mẻ (sườn lên M120), hoặc định kỳ mỗi CONFIG_REFRESH_MS.
+async function readAllRegisters(cfg) {
+  const n = cfg.index;
+
+  // 1) REALTIME — mỗi cycle
+  await readHoldingBlocks(cfg, REALTIME_HOLDING_BLOCKS);
+  await readCoilBlocks(cfg, REALTIME_COIL_BLOCKS);
+
+  // 2) Sườn lên M120 (mẻ vừa bắt đầu) → ép đọc config để thông số cài đặt tươi ngay đầu mẻ.
+  //    M120 mới nằm ở reg.val (chưa map vào cfg.values); isStart[n] còn là trạng thái mẻ trước.
+  const m120Reg = cfg.registerList.find((r) => r.name === "M120");
+  const m120Now = m120Reg && m120Reg.val === true;
+  if (m120Now && !isStart[n]) {
+    needConfigRead[n] = true;
+  }
+
+  // 3) CONFIG — theo nhịp C: khi cần (kết nối lại / đầu mẻ) hoặc định kỳ mỗi CONFIG_REFRESH_MS
+  const now = Date.now();
+  const dueByTimer = now - lastConfigRead[n] >= CONFIG_REFRESH_MS;
+  if (needConfigRead[n] || dueByTimer) {
+    await readHoldingBlocks(cfg, CONFIG_HOLDING_BLOCKS);
+    lastConfigRead[n] = now;
+    needConfigRead[n] = false;
+  }
+
+  dbg("Tất cả đã hoàn tất");
 
   // Map reg values into the fryer's values object
   cfg.registerList.forEach((reg) => {
     cfg.values[reg.name] = reg.val;
   });
-  console.log(`values["M120"] `, cfg.values["M120"]);
+  dbg(`values["M120"] `, cfg.values["M120"]);
 
   const giai_doan_1 = cfg.values["M155"];
   const giai_doan_2 = cfg.values["M124"];
@@ -274,7 +393,7 @@ async function readAllRegisters(cfg) {
     Start[n]++;
     if (Start[n] > 2) Start[n] = 2;
     postDataPlc(cfg.model, n, cfg.values, io_, Start[n], giai_doan_1, giai_doan_2, giai_doan_3, giai_doan_4);
-    console.log("đã gét data PLC" + n);
+    dbg("đã gét data PLC" + n);
   }
   // Stop
   if (
@@ -285,7 +404,7 @@ async function readAllRegisters(cfg) {
     Start[n] = 0;
     isStart[n] = false;
     postDataPlc(cfg.model, n, cfg.values, io_, Start[n], giai_doan_1, giai_doan_2, giai_doan_3, giai_doan_4);
-    console.log("đã stop gét data PLC" + n);
+    dbg("đã stop gét data PLC" + n);
   }
 }
 
@@ -301,33 +420,47 @@ for (let n = 1; n <= 8; n++) {
   plcLoop(n);
 }
 
-// Single 3000ms interval driving all 8 fryers
-let timeGetdata = setInterval(() => {
-  const status = getStatus();
-  console.log(
-    status.isConnectPLC_1,
-    status.isConnectPLC_2,
-    status.isConnectPLC_3,
-    status.isConnectPLC_4,
-    status.isConnectPLC_5,
-    status.isConnectPLC_6,
-    status.isConnectPLC_7,
-    status.isConnectPLC_8,
-  );
+// Per-fryer self-scheduling loop (replaces the single shared setInterval)
+function scheduleRead(n) {
+  const cfg = PLC_CONFIGS[n - 1];
 
-  for (const cfg of PLC_CONFIGS) {
-    const n = cfg.index;
-    if (status["isConnectPLC_" + n]) {
-      if (dbConnected && isServer) {
-        clearTimeout(timerOut_else[n]);
-        readAllRegisters(cfg);
+  async function runCycle() {
+    if (isReading[n]) return; // re-entrancy guard: skip if previous cycle still running
+    isReading[n] = true;
+    try {
+      const status = getStatus();
+      const isConn = status["isConnectPLC_" + n];
+      if (prevConnected[n] !== isConn) {
+        console.log("PLC" + n + " connected:", isConn);
+        prevConnected[n] = isConn;
+        // Vừa (tái) kết nối → ép đọc config ở cycle này để màn có thông số ngay
+        if (isConn) needConfigRead[n] = true;
       }
-    } else {
-      timerOut_else[n] = setTimeout(() => plcLoop(n), 1000);
-      console.log("đagn cố gắng kết nối else_plc" + n);
+
+      if (status["isConnectPLC_" + n]) {
+        if (dbConnected && isServer) {
+          clearTimeout(timerOut_else[n]);
+          await readAllRegisters(cfg);
+        }
+      } else {
+        timerOut_else[n] = setTimeout(() => plcLoop(n), 1000);
+        dbg("đagn cố gắng kết nối else_plc" + n);
+      }
+    } catch (err) {
+      console.error("Read cycle error PLC" + n + ":", err.message);
+    } finally {
+      isReading[n] = false;
+      setTimeout(runCycle, 800);
     }
   }
-}, 3000);
+
+  // Start the first cycle after initial delay
+  setTimeout(runCycle, 3000);
+}
+
+for (let n = 1; n <= 8; n++) {
+  scheduleRead(n);
+}
 
 //------------------------
 process.on("uncaughtException", (err) => {

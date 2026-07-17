@@ -15,6 +15,8 @@ exports.noi_chien = async (req, res, next) => {
   if (n >= 1 && n <= 8) {
     plcModels[n]
       .find()
+      .select('thoi_gian_start thoi_gian_stop dong_ep_khoi_dong')
+      .lean()
       .then((PLCDatas) => {
         res.send(PLCDatas);
       })
