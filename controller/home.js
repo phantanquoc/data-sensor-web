@@ -22,6 +22,7 @@ exports.get_noi_chien_detail = async (req, res, next) => {
   if (n >= 1 && n <= 8) {
     plcModels[n]
       .findById(id_noi_chien)
+      .lean()
       .then((PLCDatas) => {
         res.send(PLCDatas);
       })

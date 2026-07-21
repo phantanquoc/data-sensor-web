@@ -432,6 +432,9 @@ const plcSchema = new Schema({
   },
 });
 
+// Index for fast lookup of open batches (thoi_gian_stop: "")
+plcSchema.index({ thoi_gian_stop: 1 });
+
 // Register and export all 8 models indexed by fryer number (1-based)
 // plcModels[1] = noi_chien_1, plcModels[2] = noi_chien_2, ..., plcModels[8] = noi_chien_8
 const plcModels = {};
