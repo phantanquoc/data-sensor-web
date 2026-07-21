@@ -6,3 +6,5 @@ npm-debug.log
 Dockerfile
 .dockerignore
 docker-compose.yml
+client/node_modules
+client/dist

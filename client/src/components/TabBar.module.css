@@ -1,0 +1,31 @@
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 20px;
+  justify-content: center;
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 6px 20px #e0bdbd36;
+}
+
+.tabBtn {
+  padding: 12px 22px;
+  border: none;
+  border-radius: 12px;
+  color: white;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  background: #333;
+}
+
+.tabBtn:hover {
+  background: #1976d2;
+}
+
+.active {
+  background: #2196f3;
+  font-weight: bold;
+  box-shadow: 0 4px 12px rgba(0, 123, 255, 0.35);
+}

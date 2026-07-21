@@ -1,0 +1,70 @@
+.stageCard {
+  width: 100%;
+  max-width: 700px;
+  padding: 20px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #f8f9fa, #eef3f7);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  font-family: Arial, sans-serif;
+}
+
+.stageTitle {
+  margin: 0 0 20px 0;
+  font-size: 26px;
+  font-weight: bold;
+  color: #1f3c88;
+}
+
+.donutSlot {
+  display: block;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  margin: 12px 0;
+  padding: 10px 0;
+  border-bottom: 1px solid #ddd;
+}
+
+.rowLast {
+  display: flex;
+  justify-content: space-between;
+  margin: 12px 0;
+  padding: 10px 0;
+}
+
+.rowLabel {
+  color: #333;
+  font-weight: 600;
+}
+
+.valueBlue {
+  color: #007bff;
+  font-size: 18px;
+}
+
+.valueGreen {
+  color: #28a745;
+  font-size: 18px;
+}
+
+.valueOrange {
+  color: #fd7e14;
+  font-size: 18px;
+}
+
+.valuePurple {
+  color: #6f42c1;
+  font-size: 18px;
+}
+
+.valueRed {
+  color: #dc3545;
+  font-size: 18px;
+}
+
+.valueTeal {
+  color: #17a2b8;
+  font-size: 18px;
+}

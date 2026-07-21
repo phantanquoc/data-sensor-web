@@ -1,5 +1,6 @@
 # dependencies
 node_modules/
+client/node_modules/
 
 # env
 .env
@@ -11,4 +12,5 @@ node_modules/
 # build
 dist/
 build/
+client/dist/
 .claude/settings.local.json

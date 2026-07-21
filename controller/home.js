@@ -1,15 +1,5 @@
 const plcModels = require("../model/plc_schema");
 
-exports.home = async (req, res, next) => {
-  try {
-    res.render("view_home", {
-      probs: "PLCDatas",
-    });
-  } catch (error) {
-    console.log(error);
-  }
-};
-
 exports.noi_chien = async (req, res, next) => {
   const n = parseInt(req.query.so_noiChien);
   if (n >= 1 && n <= 8) {

@@ -5,6 +5,7 @@ const app = express();
 const cors = require("cors");
 app.use(cors());
 const path = require("path");
+const fs = require("fs");
 require("dotenv").config();
 
 const DEBUG = process.env.DEBUG === "true" || process.env.DEBUG === "1";
@@ -12,12 +13,8 @@ function dbg(...args) { if (DEBUG) console.log(...args); }
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-// Cấu hình thư mục 'public' làm nơi chứa file tĩnh
-app.use(express.static(path.join(__dirname, "pubic")));
 
-app.set("view engine", "ejs");
-app.set("views", "views");
-
+// --- REST routes FIRST (so SPA fallback never shadows them) ---
 app.post("/enable_machine", (req, res, next) => {
   console.log(req.body);
   res.json({
@@ -27,6 +24,25 @@ app.post("/enable_machine", (req, res, next) => {
 });
 const home = require("./router/home");
 app.use(home);
+
+// --- Serve React SPA build ---
+const SPA_DIR = path.join(__dirname, "client", "dist");
+app.use(express.static(SPA_DIR));
+
+// SPA fallback: any GET not matched by a REST route or a static asset above
+// returns index.html. Registered last so it never shadows the API routes.
+// (Express 5 / path-to-regexp no longer accepts a bare "*" path, so use a
+//  path-less middleware and gate on the GET method instead.)
+app.use((req, res, next) => {
+  if (req.method !== "GET") return next();
+  const indexPath = path.join(SPA_DIR, "index.html");
+  if (!fs.existsSync(indexPath)) {
+    return res.status(503).type("text/plain").send(
+      "Client chưa được build. Chạy: npm run build:client (hoặc npm --prefix client run build) rồi khởi động lại."
+    );
+  }
+  res.sendFile(indexPath);
+});
 
 let dbConnected = false;
 let isServer = false;

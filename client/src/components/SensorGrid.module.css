@@ -1,0 +1,40 @@
+.sensorGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  padding: 20px;
+}
+
+.sensorCard {
+  background: linear-gradient(135deg, #ffffff, #f2f8ff);
+  border-left: 5px solid #1976d2;
+  border-radius: 14px;
+  padding: 16px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+  transition: 0.25s;
+}
+
+.sensorCard:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 18px rgba(25, 118, 210, 0.18);
+}
+
+.label {
+  font-size: 15px;
+  color: #444;
+  font-weight: 600;
+}
+
+.value {
+  font-size: 24px;
+  font-weight: bold;
+  color: #1976d2;
+  background: #e3f2fd;
+  padding: 6px 14px;
+  border-radius: 10px;
+  min-width: 60px;
+  text-align: center;
+}
