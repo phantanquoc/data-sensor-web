@@ -36,6 +36,16 @@ export interface StagePayload {
   set_giai_doan: SetGiaiDoanStages123 | SetGiaiDoanStage4;
 }
 
+/**
+ * Wrapper payload for the noi_chien_N_data event.
+ * New shape: { stages: StagePayload[], stage_elapsed_ms: number | null }
+ * Backward-compat: raw StagePayload[] (old server without wrapper).
+ */
+export interface NoiChienDataPayload {
+  stages: StagePayload[];
+  stage_elapsed_ms?: number | null;
+}
+
 /** Batch list item (lean projection from GET /get_noi_chien) */
 export interface BatchListItem {
   _id: string;

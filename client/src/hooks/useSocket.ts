@@ -1,10 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
-import type { StagePayload } from '../types';
+import type { StagePayload, NoiChienDataPayload } from '../types';
 
 interface UseSocketOptions {
   soNoiChien: string;
-  onData: (stages: StagePayload[]) => void;
+  onData: (stages: StagePayload[], stageElapsedMs?: number | null) => void;
   onStop: () => void;
 }
 
@@ -37,8 +37,13 @@ export function useSocket({ soNoiChien, onData, onStop }: UseSocketOptions) {
       socket.emit('join_noi', soNoiChien);
     }
 
-    const dataHandler = (stages: StagePayload[]) => {
-      onData(stages);
+    const dataHandler = (payload: StagePayload[] | NoiChienDataPayload) => {
+      // Backward-compat: old server sends raw array, new server sends wrapper object
+      if (Array.isArray(payload)) {
+        onData(payload, undefined);
+      } else {
+        onData(payload.stages, payload.stage_elapsed_ms);
+      }
     };
     const stopHandler = () => {
       onStop();
@@ -49,9 +54,9 @@ export function useSocket({ soNoiChien, onData, onStop }: UseSocketOptions) {
     for (let n = 1; n <= 8; n++) {
       const dataEvent = `noi_chien_${n}_data`;
       const stopEvent = `noi_chien_${n}_stop`;
-      const dh = (stages: StagePayload[]) => {
+      const dh = (payload: StagePayload[] | NoiChienDataPayload) => {
         if (soNoiChien === String(n)) {
-          dataHandler(stages);
+          dataHandler(payload);
         }
       };
       const sh = () => {

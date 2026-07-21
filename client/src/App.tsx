@@ -40,8 +40,8 @@ function App() {
     autoLoad,
   } = useFryerData();
 
-  const onData = useCallback((stagesArr: StagePayload[]) => {
-    handleDataEvent(stagesArr);
+  const onData = useCallback((stagesArr: StagePayload[], stageElapsedMs?: number | null) => {
+    handleDataEvent(stagesArr, stageElapsedMs);
   }, [handleDataEvent]);
 
   const onStop = useCallback(() => {
@@ -116,7 +116,8 @@ function App() {
                 key={idx}
                 stage={stage}
                 stageIndex={idx + 1}
-                donutStartMs={donut.stage === idx + 1 ? donut.startMs : null}
+                donutElapsedMs={donut.stage === idx + 1 ? donut.elapsedMs : null}
+                donutReceivedAt={donut.stage === idx + 1 ? donut.receivedAt : 0}
                 donutTargetMin={donut.stage === idx + 1 ? donut.targetMin : 0}
                 activeDonutStage={donut.stage}
               />

@@ -13,6 +13,13 @@ const pushCount = {};            // pushCount[n] = {1,2,3,4} đếm số chu k�
 // Cache latest stagesArray per fryer for instant snapshot on client join
 const latestStages = {};
 
+// Server-authoritative stage-start timestamps (RAM). Anchored on each stage's
+// rising edge; cleared on its falling edge. Lost on restart — a restart closes
+// the running batch (cleanupOrphanBatches) and starts a fresh one, so elapsed
+// legitimately restarts rather than being recovered.
+// stageStartMs[n] = { 1: ms|null, 2: ms|null, 3: ms|null, 4: ms|null }
+const stageStartMs = {};
+
 /**
  * postDataPlc - single parameterized function replacing the 8 post_data_to_db_* files.
  *
@@ -343,6 +350,7 @@ exports.postDataPlc = async (
     if (docunent) {
       id_document[n] = docunent._id;
       pushCount[n] = { 1: 0, 2: 0, 3: 0, 4: 0 };
+      stageStartMs[n] = { 1: null, 2: null, 3: null, 4: null };
     }
   }
   // update
@@ -440,6 +448,40 @@ exports.postDataPlc = async (
     });
   }
 
+  // --- Stage-start tracking + elapsed computation (server-authoritative) ---
+  if (!stageStartMs[n]) stageStartMs[n] = { 1: null, 2: null, 3: null, 4: null };
+  const activeFlags = [
+    giai_doan_1 && typeof giai_doan_1 === "boolean",
+    giai_doan_2 && typeof giai_doan_2 === "boolean",
+    giai_doan_3 && typeof giai_doan_3 === "boolean",
+    giai_doan_4 && typeof giai_doan_4 === "boolean",
+  ];
+
+  for (let k = 1; k <= 4; k++) {
+    const wasActive = stageStartMs[n][k] !== null;
+    const nowActive = !!activeFlags[k - 1];
+    if (nowActive && !wasActive) {
+      // Rising edge: anchor this stage's start to the server clock now.
+      // On restart, cleanupOrphanBatches (app.js) closes any running batch and a
+      // fresh document is created on the next M120 cycle, so there is no prior
+      // stage-start to recover — elapsed legitimately restarts with the new batch.
+      stageStartMs[n][k] = Date.now();
+    } else if (!nowActive && wasActive) {
+      // Falling edge: clear
+      stageStartMs[n][k] = null;
+    }
+    // active→active: leave unchanged (no-op)
+  }
+
+  // Compute stage_elapsed_ms: find active stage, compute elapsed
+  let stage_elapsed_ms = null;
+  for (let k = 1; k <= 4; k++) {
+    if (activeFlags[k - 1] && stageStartMs[n][k] !== null) {
+      stage_elapsed_ms = Math.max(0, Date.now() - stageStartMs[n][k]);
+      break;
+    }
+  }
+
   // Consolidated emit: single event with 4-stage array, room-scoped
   const stagesArray = [
     {
@@ -494,8 +536,8 @@ exports.postDataPlc = async (
       },
     },
   ];
-  latestStages[n] = stagesArray;
-  io_.to("noi_" + n).emit("noi_chien_" + n + "_data", stagesArray);
+  latestStages[n] = { stages: stagesArray, stage_elapsed_ms };
+  io_.to("noi_" + n).emit("noi_chien_" + n + "_data", { stages: stagesArray, stage_elapsed_ms });
 };
 
 exports.getLatestStages = (n) => latestStages[n];

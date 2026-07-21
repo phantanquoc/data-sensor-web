@@ -1,15 +1,12 @@
-# realtime-socket-delivery Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change optimize-hmi-modbus-socket. Update Purpose after archive.
-## Requirements
 ### Requirement: Consolidated per-fryer data event
 
-For each read cycle of a fryer, the server SHALL emit a single `noi_chien_N_data` event whose payload is an object `{ stages, stage_elapsed_ms }` where `stages` is an array of the 4 stage objects and `stage_elapsed_ms` is the server-computed elapsed milliseconds of the active stage (or `null` when no stage is active). Each stage object SHALL preserve today's fields exactly: `data`, `giai_doan`, `active`, `tong_thoi_gian_chay`, and `set_giai_doan`. Adding `stage_elapsed_ms` SHALL NOT alter any existing field.
+For each read cycle of a fryer, the server SHALL emit a single `noi_chien_N_data` event whose payload is an array of the 4 stage objects, instead of 4 separate emits. Each stage object SHALL preserve today's fields exactly: `data`, `giai_doan`, `active`, `tong_thoi_gian_chay`, and `set_giai_doan`. The event payload SHALL additionally carry a server-computed `stage_elapsed_ms` field representing the currently active stage's elapsed run time in milliseconds, or `null` when no stage is active. Adding `stage_elapsed_ms` SHALL NOT alter any existing field.
 
 #### Scenario: One event per fryer per cycle
 - **WHEN** a fryer completes a read cycle and emits its data
-- **THEN** the server emits exactly one `noi_chien_N_data` event carrying an object with a `stages` array of 4 stage objects and a `stage_elapsed_ms` field
+- **THEN** the server emits exactly one `noi_chien_N_data` event carrying an array of 4 stage objects
 - **AND** each stage object contains the same `data`, `giai_doan`, `active`, `tong_thoi_gian_chay`, and `set_giai_doan` content that the 4 separate events carried before
 
 #### Scenario: Fleet emit count reduced
@@ -25,43 +22,7 @@ For each read cycle of a fryer, the server SHALL emit a single `noi_chien_N_data
 - **WHEN** a fryer has no active stage (idle, or between stages) and emits `noi_chien_N_data`
 - **THEN** `stage_elapsed_ms` is `null`
 
-### Requirement: Room-scoped delivery
-
-The server SHALL deliver `noi_chien_N_data` and `noi_chien_N_stop` only to clients in the room for fryer N (`noi_N`), using `io_.to("noi_N").emit(...)`, rather than broadcasting to all connected clients.
-
-#### Scenario: Only viewers of a fryer receive its events
-- **WHEN** the server emits data or stop for fryer N
-- **THEN** only clients currently joined to room `noi_N` receive the event
-- **AND** clients viewing a different fryer do not receive fryer N's events
-
-### Requirement: Client room join/leave on tab switch
-
-The browser client SHALL join the room for the fryer it is currently viewing and leave the previous fryer's room when the user switches tabs, so it receives events only for the active fryer. On initial load the client SHALL join the room for the default fryer tab.
-
-#### Scenario: Switching tabs moves the client between rooms
-- **WHEN** the user switches from fryer A's tab to fryer B's tab
-- **THEN** the client leaves room `noi_A` and joins room `noi_B`
-- **AND** subsequently receives only fryer B's events
-
-#### Scenario: Initial load joins default room
-- **WHEN** the dashboard first loads with the default fryer tab active
-- **THEN** the client joins that fryer's room and receives its events
-
-### Requirement: Client consumes wrapper payload
-
-The browser client SHALL handle the `noi_chien_N_data` payload as an object `{ stages, stage_elapsed_ms }`, rendering all 4 stages from `stages` and using `stage_elapsed_ms` for the donut timer display. For backward compatibility, if the payload is a raw array (old server), the client SHALL treat it as the stages array with `stage_elapsed_ms` undefined. The `noi_chien_N_stop` handling SHALL be unchanged apart from being room-scoped.
-
-#### Scenario: Wrapper payload renders all stages
-- **WHEN** the client receives a `noi_chien_N_data` event with a wrapper object
-- **THEN** it renders all 4 stages from `payload.stages` and displays the donut timer from `payload.stage_elapsed_ms`
-
-#### Scenario: Backward-compat with array payload
-- **WHEN** the client receives a `noi_chien_N_data` event with a raw 4-stage array (old server)
-- **THEN** it renders all 4 stages and falls back to document-seeded donut timing
-
-#### Scenario: Stop event still resets the view
-- **WHEN** the client receives `noi_chien_N_stop` for the fryer it is viewing
-- **THEN** it resets the real-time view as before
+## ADDED Requirements
 
 ### Requirement: Server owns active-stage elapsed time
 
@@ -77,22 +38,22 @@ The server SHALL compute each fryer's active-stage elapsed time from an in-memor
 - **THEN** `stage_elapsed_ms` increases monotonically according to the server clock, independent of any client clock
 
 #### Scenario: Stage transition re-anchors elapsed
-- **WHEN** the active stage changes from one stage to another (e.g. giai doan 1 to 2)
+- **WHEN** the active stage changes from one stage to another (e.g. giai đoạn 1 → 2)
 - **THEN** the newly active stage's start instant is recorded on its rising edge
 - **AND** `stage_elapsed_ms` reflects the new stage's elapsed time, not the previous stage's
 
-### Requirement: Elapsed anchor lifecycle across restart
+### Requirement: Elapsed re-seed on server restart
 
-The server's `stageStartMs` anchors are in-memory only and SHALL be lost on restart. On startup the server closes any batch left running (`cleanupOrphanBatches` sets `thoi_gian_stop`), and the next `M120` start cycle creates a fresh document; the newly active stage's anchor is therefore recorded on its rising edge against the server clock at that moment. The server SHALL NOT attempt to recover a pre-restart elapsed value from the document — a restart ends the interrupted batch and any resumed run legitimately starts its elapsed from zero.
+When the server restarts or reconnects while a batch is still running, it SHALL re-seed `stageStartMs` for the active stage from the running document's recorded data rather than resetting elapsed to zero. The seed source SHALL be `bien_du_lieu[1].thoi_gian` (the first real record, skipping the `[0]` init row) of the active stage, parsed as `"HH:MM:SS DD/MM/YYYY"`. If that timestamp is unavailable or unparseable, the server MAY fall back to the current time for that stage.
 
-#### Scenario: Restart closes the running batch and restarts elapsed
-- **WHEN** the server restarts while fryer `n` had a running batch
-- **THEN** the interrupted batch is closed on startup and a new document is created on the next start cycle
-- **AND** the active stage's `stageStartMs[n][stage]` is anchored to the server clock on its rising edge, with `stage_elapsed_ms` beginning near zero for the new run
+#### Scenario: Restart mid-batch preserves elapsed
+- **WHEN** the server restarts while fryer `n` has a running batch with an active stage that has at least two `bien_du_lieu` entries
+- **THEN** `stageStartMs[n][activeStage]` is seeded from `bien_du_lieu[1].thoi_gian`
+- **AND** the first `stage_elapsed_ms` emitted after restart reflects the real elapsed time, not zero
 
-#### Scenario: No document read on the rising edge
-- **WHEN** a stage becomes active for fryer `n`
-- **THEN** the server anchors `stageStartMs[n][stage]` to `Date.now()` without querying the batch document
+#### Scenario: Missing seed timestamp falls back safely
+- **WHEN** the active stage's `bien_du_lieu[1].thoi_gian` is missing or unparseable at restart
+- **THEN** the server seeds that stage's start to the current time and continues without error
 
 ### Requirement: Client displays server elapsed with freeze-on-stall
 
@@ -119,4 +80,3 @@ The client SHALL remain functional when a `noi_chien_N_data` payload does not in
 - **WHEN** the client receives a `noi_chien_N_data` payload with no `stage_elapsed_ms` field
 - **THEN** the client derives the donut elapsed from the batch document (prior behavior)
 - **AND** no error occurs and the donut still renders
-

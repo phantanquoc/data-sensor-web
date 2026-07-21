@@ -1,14 +1,17 @@
 import React, { useEffect, useState } from 'react';
 
 interface DonutTimerProps {
-  startMs: number;
+  elapsedMs: number;
+  receivedAt: number;
   targetMin: number;
 }
 
 const RADIUS = 27;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS; // 169.646
+// Cap interpolation to 2x the expected emit gap (~1s) to freeze on stall
+const MAX_INTERP = 2000;
 
-export const DonutTimer: React.FC<DonutTimerProps> = ({ startMs, targetMin }) => {
+export const DonutTimer: React.FC<DonutTimerProps> = ({ elapsedMs, receivedAt, targetMin }) => {
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -16,8 +19,10 @@ export const DonutTimer: React.FC<DonutTimerProps> = ({ startMs, targetMin }) =>
     return () => clearInterval(id);
   }, []);
 
-  const elapsedMs = now - startMs;
-  const elapsedMin = elapsedMs / 60000;
+  // Interpolate from server value but cap so donut freezes when server stops emitting
+  const localDelta = Math.min(Date.now() - receivedAt, MAX_INTERP);
+  const displayedMs = elapsedMs + localDelta;
+  const elapsedMin = displayedMs / 60000;
   const isOvertime = targetMin > 0 && elapsedMin > targetMin;
   const color = isOvertime ? '#fd7e14' : '#00aaff';
 
@@ -29,6 +34,9 @@ export const DonutTimer: React.FC<DonutTimerProps> = ({ startMs, targetMin }) =>
   }
   const elapsedText = elapsedMin.toFixed(1);
   const dashOffset = CIRCUMFERENCE - (CIRCUMFERENCE * pct) / 100;
+
+  // Suppress unused 'now' lint warning — it drives re-renders
+  void now;
 
   return (
     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 70 }}>

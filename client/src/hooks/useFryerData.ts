@@ -39,29 +39,15 @@ function makeResetStages(): StagePayload[] {
 }
 
 /**
- * Seed the donut startMs so that displayed elapsed = tsLast − tsFirst (the DB
- * span of the stage's recorded data). This is a frozen snapshot: if the batch
- * stops updating (HMI disconnect, batch ended without stop event), the elapsed
- * time freezes at the last known span rather than counting wall-clock forward.
- *
- * Algorithm (mirrors EJS `seedStartMsFromDoc` in view_home.ejs):
- *   first = bien_du_lieu[1]  (skip [0] init row)
- *   last  = bien_du_lieu[length - 1]
- *   elapsedAtSeed = tsLast - tsFirst  (clamped >= 0)
- *   startMs = Date.now() - elapsedAtSeed
- *
- * The donut then computes elapsed = now - startMs = elapsedAtSeed at seed time,
- * and counts forward from there while live ticks keep arriving.
- *
- * Returns null when the doc can't provide a valid seed (caller falls back to
- * Date.now(), yielding elapsed = 0 for a stage that only just went active).
+ * Backward-compat fallback: seed donut startMs from document when server does
+ * not provide stage_elapsed_ms (old server). Returns null when unavailable.
  */
 function seedStartMsFromDoc(doc: BatchDocument | null, gNum: number): number | null {
   if (!doc) return null;
   const gdKey = `giai_doan_${gNum}` as keyof BatchDocument;
   const gd = doc[gdKey] as { bien_du_lieu?: Array<{ thoi_gian?: string }> } | undefined;
   if (!gd || !Array.isArray(gd.bien_du_lieu) || gd.bien_du_lieu.length < 2) return null;
-  const first = gd.bien_du_lieu[1]; // skip [0] init record
+  const first = gd.bien_du_lieu[1];
   const last = gd.bien_du_lieu[gd.bien_du_lieu.length - 1];
   const tsFirst = parseTs(first.thoi_gian);
   const tsLast = parseTs(last.thoi_gian);
@@ -73,7 +59,8 @@ function seedStartMsFromDoc(doc: BatchDocument | null, gNum: number): number | n
 
 export interface DonutState {
   stage: number | null;
-  startMs: number;
+  elapsedMs: number;
+  receivedAt: number;
   targetMin: number;
 }
 
@@ -84,24 +71,31 @@ export interface FryerState {
   donut: DonutState;
 }
 
+const DONUT_ZERO: DonutState = { stage: null, elapsedMs: 0, receivedAt: 0, targetMin: 0 };
+
 export function useFryerData() {
   const [stages, setStages] = useState<StagePayload[]>(makeResetStages());
   const [batchList, setBatchList] = useState<BatchListItem[]>([]);
   const [batchDetail, setBatchDetail] = useState<BatchDocument | null>(null);
-  const [donut, setDonut] = useState<DonutState>({ stage: null, startMs: 0, targetMin: 0 });
+  const [donut, setDonut] = useState<DonutState>(DONUT_ZERO);
 
   const currentRunningDocRef = useRef<BatchDocument | null>(null);
-  const donutRef = useRef<DonutState>({ stage: null, startMs: 0, targetMin: 0 });
+  const donutRef = useRef<DonutState>(DONUT_ZERO);
+  // Fallback-only anchor: the seeded stage start used when the server does not
+  // provide stage_elapsed_ms. Elapsed is recomputed from it on every tick so the
+  // donut keeps counting forward (not frozen at the rising-edge value).
+  const fallbackStartMsRef = useRef<number | null>(null);
 
   const resetView = useCallback(() => {
     setStages(makeResetStages());
-    donutRef.current = { stage: null, startMs: 0, targetMin: 0 };
-    setDonut({ stage: null, startMs: 0, targetMin: 0 });
+    donutRef.current = DONUT_ZERO;
+    setDonut(DONUT_ZERO);
     currentRunningDocRef.current = null;
+    fallbackStartMsRef.current = null;
   }, []);
 
-  /** Process a single stage payload (same logic as realTimer_he_chien) */
-  const processStage = useCallback((stagePayload: StagePayload) => {
+  /** Process a single stage payload (updates stages state + donut for backward-compat fallback) */
+  const processStage = useCallback((stagePayload: StagePayload, stageElapsedMs?: number | null) => {
     const stageNum = parseInt(stagePayload.giai_doan.replace('Giai đoạn: ', ''), 10);
     if (isNaN(stageNum) || stageNum < 1 || stageNum > 4) return;
 
@@ -111,7 +105,7 @@ export function useFryerData() {
       return next;
     });
 
-    // Donut logic
+    // Donut logic — server-authoritative path when stageElapsedMs is provided
     if (stagePayload.active) {
       let targetMin: number;
       if (stageNum <= 3) {
@@ -120,29 +114,39 @@ export function useFryerData() {
         targetMin = Number((stagePayload.set_giai_doan as SetGiaiDoanStage4).thoi_gian_treo_long) || 0;
       }
 
-      if (donutRef.current.stage !== stageNum) {
-        // Stage transition: seed once from the running doc's DB span.
-        const startMs = seedStartMsFromDoc(currentRunningDocRef.current, stageNum) ?? Date.now();
-        donutRef.current = { stage: stageNum, startMs, targetMin };
-        setDonut({ stage: stageNum, startMs, targetMin });
+      if (typeof stageElapsedMs === 'number') {
+        // Server-authoritative: use server-provided elapsed
+        const newDonut: DonutState = { stage: stageNum, elapsedMs: stageElapsedMs, receivedAt: Date.now(), targetMin };
+        donutRef.current = newDonut;
+        setDonut(newDonut);
       } else {
-        // Same stage: only update targetMin (startMs stays fixed so the live
-        // timer counts forward from the seeded point — matches EJS behavior).
-        donutRef.current.targetMin = targetMin;
-        setDonut((prev) => ({ ...prev, targetMin }));
+        // Backward-compat fallback: derive elapsed from a document-seeded anchor
+        // (old server without stage_elapsed_ms). Seed the anchor once on the
+        // stage rising edge, then recompute elapsed = now - anchor every tick so
+        // the donut counts forward instead of freezing at the seed value.
+        if (donutRef.current.stage !== stageNum) {
+          fallbackStartMsRef.current =
+            seedStartMsFromDoc(currentRunningDocRef.current, stageNum) ?? Date.now();
+        }
+        const startMs = fallbackStartMsRef.current ?? Date.now();
+        const elapsed = Math.max(0, Date.now() - startMs);
+        const newDonut: DonutState = { stage: stageNum, elapsedMs: elapsed, receivedAt: Date.now(), targetMin };
+        donutRef.current = newDonut;
+        setDonut(newDonut);
       }
     } else {
       if (donutRef.current.stage === stageNum) {
-        donutRef.current = { stage: null, startMs: 0, targetMin: 0 };
-        setDonut({ stage: null, startMs: 0, targetMin: 0 });
+        donutRef.current = DONUT_ZERO;
+        setDonut(DONUT_ZERO);
+        fallbackStartMsRef.current = null;
       }
     }
   }, []);
 
-  /** Handle full data event (array of 4 stages) */
-  const handleDataEvent = useCallback((stagesArray: StagePayload[]) => {
+  /** Handle full data event (array of 4 stages + optional server elapsed) */
+  const handleDataEvent = useCallback((stagesArray: StagePayload[], stageElapsedMs?: number | null) => {
     for (const s of stagesArray) {
-      processStage(s);
+      processStage(s, stageElapsedMs);
     }
   }, [processStage]);
 
@@ -169,10 +173,10 @@ export function useFryerData() {
       const chosen = running || documents[documents.length - 1];
 
       const fullDoc = await getNoiChienDetail(chosen._id, n);
-      // Retain running doc for donut seeding only when batch is running
+      // Retain running doc for backward-compat donut seeding only when batch is running
       currentRunningDocRef.current = running ? fullDoc : null;
 
-      // Rebuild 4 stage payloads from the document
+      // Rebuild 4 stage payloads from the document (static snapshot, no donut)
       const lastOf = (gd: { bien_du_lieu?: Array<Record<string, unknown>> }) =>
         gd && Array.isArray(gd.bien_du_lieu) && gd.bien_du_lieu.length
           ? gd.bien_du_lieu[gd.bien_du_lieu.length - 1]

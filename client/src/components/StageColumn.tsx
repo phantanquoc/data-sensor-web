@@ -6,7 +6,8 @@ import { DonutTimer } from './DonutTimer';
 interface StageColumnProps {
   stage: StagePayload;
   stageIndex: number; // 1-4
-  donutStartMs: number | null;
+  donutElapsedMs: number | null;
+  donutReceivedAt: number;
   donutTargetMin: number;
   activeDonutStage: number | null;
 }
@@ -22,18 +23,19 @@ function isStage4(s: StagePayload['set_giai_doan']): s is SetGiaiDoanStage4 {
 export const StageColumn: React.FC<StageColumnProps> = ({
   stage,
   stageIndex,
-  donutStartMs,
+  donutElapsedMs,
+  donutReceivedAt,
   donutTargetMin,
   activeDonutStage,
 }) => {
-  const showDonut = stage.active && activeDonutStage === stageIndex && donutStartMs !== null;
+  const showDonut = stage.active && activeDonutStage === stageIndex && donutElapsedMs !== null;
 
   return (
     <div className={styles.stageCard}>
       <p className={styles.stageTitle}>{stage.giai_doan}</p>
       <span className={styles.donutSlot}>
         {showDonut && (
-          <DonutTimer startMs={donutStartMs!} targetMin={donutTargetMin} />
+          <DonutTimer elapsedMs={donutElapsedMs!} receivedAt={donutReceivedAt} targetMin={donutTargetMin} />
         )}
       </span>
       {isStage123(stage.set_giai_doan) && (
