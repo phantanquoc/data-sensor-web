@@ -39,36 +39,42 @@ function makeResetStages(): StagePayload[] {
 }
 
 /**
- * Anchor the donut to the stage's real start time so elapsed = now - stageStart.
+ * Seed the donut startMs so that displayed elapsed = tsLast − tsFirst (the DB
+ * span of the stage's recorded data). This is a frozen snapshot: if the batch
+ * stops updating (HMI disconnect, batch ended without stop event), the elapsed
+ * time freezes at the last known span rather than counting wall-clock forward.
  *
- * The original algorithm seeded elapsed = (last DB record - first DB record),
- * which froze at the last 15s push and reset toward 0 on every tab switch.
- * Instead we anchor startMs to the stage's first real record ([1], skipping the
- * empty [0] init row). tsFirst is constant, so re-seeding on tab switch is
- * idempotent — the timer keeps counting from the true stage start, never resets.
+ * Algorithm (mirrors EJS `seedStartMsFromDoc` in view_home.ejs):
+ *   first = bien_du_lieu[1]  (skip [0] init row)
+ *   last  = bien_du_lieu[length - 1]
+ *   elapsedAtSeed = tsLast - tsFirst  (clamped >= 0)
+ *   startMs = Date.now() - elapsedAtSeed
  *
- * Returns the anchor startMs, or null when the doc can't provide one (caller
- * then falls back to Date.now() for a stage that only just went active live).
+ * The donut then computes elapsed = now - startMs = elapsedAtSeed at seed time,
+ * and counts forward from there while live ticks keep arriving.
+ *
+ * Returns null when the doc can't provide a valid seed (caller falls back to
+ * Date.now(), yielding elapsed = 0 for a stage that only just went active).
  */
 function seedStartMsFromDoc(doc: BatchDocument | null, gNum: number): number | null {
   if (!doc) return null;
   const gdKey = `giai_doan_${gNum}` as keyof BatchDocument;
   const gd = doc[gdKey] as { bien_du_lieu?: Array<{ thoi_gian?: string }> } | undefined;
   if (!gd || !Array.isArray(gd.bien_du_lieu) || gd.bien_du_lieu.length < 2) return null;
-  const first = gd.bien_du_lieu[1]; // skip [0] init record (empty thoi_gian)
+  const first = gd.bien_du_lieu[1]; // skip [0] init record
+  const last = gd.bien_du_lieu[gd.bien_du_lieu.length - 1];
   const tsFirst = parseTs(first.thoi_gian);
-  if (!tsFirst) return null;
-  const startMs = tsFirst.getTime();
-  // Guard against clock skew putting the anchor in the future.
-  return startMs > Date.now() ? Date.now() : startMs;
+  const tsLast = parseTs(last.thoi_gian);
+  if (!tsFirst || !tsLast) return null;
+  let elapsedAtSeed = tsLast.getTime() - tsFirst.getTime();
+  if (elapsedAtSeed < 0) elapsedAtSeed = 0;
+  return Date.now() - elapsedAtSeed;
 }
 
 export interface DonutState {
   stage: number | null;
   startMs: number;
   targetMin: number;
-  /** true once startMs was anchored from the DB doc (not a live fallback) */
-  seededFromDoc?: boolean;
 }
 
 export interface FryerState {
@@ -115,26 +121,13 @@ export function useFryerData() {
       }
 
       if (donutRef.current.stage !== stageNum) {
-        // Stage transition (or first tick after a tab switch).
-        const anchored = seedStartMsFromDoc(currentRunningDocRef.current, stageNum);
-        // If the doc anchor isn't available yet (async auto-load still in
-        // flight), fall back to now and DON'T drop the doc — a later tick will
-        // re-anchor once it loads, self-correcting the race.
-        const seededFromDoc = anchored !== null;
-        const startMs = anchored ?? Date.now();
-        donutRef.current = { stage: stageNum, startMs, targetMin, seededFromDoc };
+        // Stage transition: seed once from the running doc's DB span.
+        const startMs = seedStartMsFromDoc(currentRunningDocRef.current, stageNum) ?? Date.now();
+        donutRef.current = { stage: stageNum, startMs, targetMin };
         setDonut({ stage: stageNum, startMs, targetMin });
       } else {
-        // Same stage. Re-anchor if we only had a live fallback and the running
-        // doc has since loaded (fixes elapsed jumping to ~0 on tab switch).
-        if (!donutRef.current.seededFromDoc) {
-          const anchored = seedStartMsFromDoc(currentRunningDocRef.current, stageNum);
-          if (anchored !== null) {
-            donutRef.current.startMs = anchored;
-            donutRef.current.seededFromDoc = true;
-            setDonut((prev) => ({ ...prev, startMs: anchored }));
-          }
-        }
+        // Same stage: only update targetMin (startMs stays fixed so the live
+        // timer counts forward from the seeded point — matches EJS behavior).
         donutRef.current.targetMin = targetMin;
         setDonut((prev) => ({ ...prev, targetMin }));
       }

@@ -60,11 +60,9 @@ The active stage SHALL display a hand-drawn SVG donut progress timer (radius 27,
 
 #### Scenario: Seeding elapsed time from the running document
 - **WHEN** a running batch is loaded and its stage's `bien_du_lieu` has at least 2 entries
-- **THEN** the donut's start time is anchored directly to `bien_du_lieu[1]`'s timestamp (parsed as "HH:MM:SS DD/MM/YYYY", skipping the [0] init row), so elapsed = now − stage-start
-- **AND** re-anchoring on tab switch is idempotent (tsFirst is constant, so the timer never resets)
-- **AND** if no valid anchor is available (insufficient entries or unparseable timestamp) the timer returns null and the caller falls back to `Date.now()` for a stage that only just went active live
-- **AND** a future anchor (clock skew) is clamped to `Date.now()` to prevent negative elapsed
-- **AND** after the first live tick the timer continues from live time
+- **THEN** the donut's elapsed time is seeded as the difference between the last `bien_du_lieu` entry's timestamp and `bien_du_lieu[1]`'s timestamp (both parsed as "HH:MM:SS DD/MM/YYYY", skipping the [0] init row), i.e. `elapsedAtSeed = tsLast - tsFirst` (clamped >= 0) and `startMs = Date.now() - elapsedAtSeed`
+- **AND** if no valid seed is available (insufficient entries or unparseable timestamps) the function returns null and the caller falls back to `Date.now()` (elapsed starts at 0 for a stage that only just went active live)
+- **AND** after the first live tick the timer continues counting forward from the seeded point
 
 #### Scenario: Stage transition clears the previous donut
 - **WHEN** the active stage changes from one stage to another
