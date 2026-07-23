@@ -219,6 +219,10 @@ export function useFleetHistory(): FleetHistoryState {
   const latestBatchStartRef = useRef<Record<number, number>>({});
   const latestRunningRef = useRef<Record<number, boolean>>({});
   const lastStageRef = useRef<Record<number, 1 | 2 | 3 | 4 | null>>({});
+  // Last server-computed stage_elapsed_ms per machine. A new batch re-anchors
+  // stage 1 on the server, so its elapsed restarts near 0 — a drop signals a
+  // new batch even when the stop event was missed and previousStage stayed 1.
+  const lastElapsedRef = useRef<Record<number, number | null>>({});
   const revisionRef = useRef<Record<number, number>>({});
   const latestTempPtsRef = useRef<Record<number, ChartPoint[]>>({});
   const latestApPtsRef = useRef<Record<number, ChartPoint[]>>({});
@@ -338,10 +342,13 @@ export function useFleetHistory(): FleetHistoryState {
         if (!initializedRef.current[machineN]) return;
 
         let stages: StagePayload[];
+        let elapsedMs: number | null;
         if (Array.isArray(payload)) {
           stages = payload;
+          elapsedMs = null;
         } else {
           stages = payload.stages;
+          elapsedMs = payload.stage_elapsed_ms ?? null;
         }
         if (!Array.isArray(stages) || stages.length === 0) return;
 
@@ -354,9 +361,21 @@ export function useFleetHistory(): FleetHistoryState {
         if (!sensorTs) return;
 
         const previousStage = lastStageRef.current[machineN];
+        // Server re-anchors stage 1's elapsed on every new batch, so while in
+        // stage 1 a drop in stage_elapsed_ms vs the previous tick means the old
+        // batch ended and a new one began — the reliable signal that catches
+        // the case previousStage>1 / !running both miss (batch that only ever
+        // reached stage 1, or a missed stop event).
+        const prevElapsed = lastElapsedRef.current[machineN];
+        const elapsedReset =
+          stageNum === 1 &&
+          elapsedMs != null &&
+          prevElapsed != null &&
+          elapsedMs < prevElapsed;
         const startsNewBatch = stageNum === 1 && (
           !latestRunningRef.current[machineN]
           || (previousStage != null && previousStage > 1)
+          || elapsedReset
         );
 
         if (startsNewBatch) {
@@ -386,6 +405,7 @@ export function useFleetHistory(): FleetHistoryState {
         const nowPhut = (sensorTs.getTime() - batchStart) / 60000;
         if (nowPhut < 0) return;
         lastStageRef.current[machineN] = stageNum;
+        lastElapsedRef.current[machineN] = elapsedMs;
 
         // --- Temperature ---
         const tPts = latestTempPtsRef.current[machineN] ?? [];
