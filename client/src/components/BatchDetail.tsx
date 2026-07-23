@@ -1,150 +1,203 @@
 import React from 'react';
+import { Activity, CalendarDays, Clock3, Gauge, Thermometer, Zap } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import styles from './BatchDetail.module.css';
 import type { BatchDocument, BienDuLieuEntry } from '../types';
-import { getDuration } from '../hooks/timeUtils';
+import { parseTs } from '../hooks/timeUtils';
 
 interface BatchDetailProps {
   data: BatchDocument;
 }
 
-const SENSOR_LABELS = [
-  { key: 'ap_suat_vo_hoi', label: 'Áp suất vỏ hơi' },
-  { key: 'ap_suat_chan_khong', label: 'Áp suất chân không' },
-  { key: 'ap_suat_vong_nuoc', label: 'Áp suất vòng nước' },
-  { key: 'nhiet_do', label: 'Nhiệt độ' },
-  { key: 'dong_dien_dong_co_root', label: 'Dòng điện động cơ root' },
-  { key: 'dong_dien_dong_co_vong_nuoc', label: 'Dòng điện động cơ vòng nước' },
-  { key: 'nhiet_do_vao_binh_sinh_han', label: 'Nhiệt độ vào bình sinh hàn' },
-  { key: 'nhiet_do_ra_binh_sinh_han', label: 'Nhiệt độ ra bình sinh hàn' },
-  { key: 'nhiet_do_vao_bom_vong_nuoc', label: 'Nhiệt độ vào bơm vòng nước' },
-  { key: 'nhiet_do_ra_bom_vong_nuoc', label: 'NHiệt độ ra bơm vòng nước' },
-];
+type MetricKey =
+  | 'nhiet_do'
+  | 'nhiet_do_vao_binh_sinh_han'
+  | 'nhiet_do_ra_binh_sinh_han'
+  | 'nhiet_do_vao_bom_vong_nuoc'
+  | 'nhiet_do_ra_bom_vong_nuoc'
+  | 'ap_suat_vo_hoi'
+  | 'ap_suat_chan_khong'
+  | 'ap_suat_vong_nuoc'
+  | 'dong_dien_dong_co_root'
+  | 'dong_dien_dong_co_vong_nuoc';
 
-function computeAverage(entries: BienDuLieuEntry[], field: string): string {
-  if (entries.length <= 1) return '0';
-  const divisor = entries.length - 1;
-  let sum = 0;
-  for (const entry of entries) {
-    sum += Number(entry[field]) || 0;
-  }
-  return (sum / divisor).toFixed(2);
+interface MetricDefinition {
+  key: MetricKey;
+  label: string;
 }
 
-function getStageDuration(entries: BienDuLieuEntry[]): string {
-  if (entries.length <= 1) return '0';
-  const first = entries[1];
-  const last = entries[entries.length - 1];
-  if (!first.thoi_gian || !last.thoi_gian) return '0';
-  try {
-    return getDuration(first.thoi_gian, last.thoi_gian).text;
-  } catch {
-    return '0';
-  }
+const metricGroups: Array<{
+  title: string;
+  tone: 'temperature' | 'pressure' | 'current';
+  icon: LucideIcon;
+  metrics: MetricDefinition[];
+}> = [
+  {
+    title: 'Nhiệt độ',
+    tone: 'temperature',
+    icon: Thermometer,
+    metrics: [
+      { key: 'nhiet_do', label: 'Nhiệt độ chiến' },
+      { key: 'nhiet_do_vao_binh_sinh_han', label: 'Vào bình sinh hàn' },
+      { key: 'nhiet_do_ra_binh_sinh_han', label: 'Ra bình sinh hàn' },
+      { key: 'nhiet_do_vao_bom_vong_nuoc', label: 'Vào động cơ vòng nước' },
+      { key: 'nhiet_do_ra_bom_vong_nuoc', label: 'Ra động cơ vòng nước' },
+    ],
+  },
+  {
+    title: 'Áp suất',
+    tone: 'pressure',
+    icon: Gauge,
+    metrics: [
+      { key: 'ap_suat_vo_hoi', label: 'Vỏ hơi' },
+      { key: 'ap_suat_chan_khong', label: 'Chân không' },
+      { key: 'ap_suat_vong_nuoc', label: 'Vòng nước' },
+    ],
+  },
+  {
+    title: 'Dòng điện',
+    tone: 'current',
+    icon: Zap,
+    metrics: [
+      { key: 'dong_dien_dong_co_root', label: 'Động cơ Root' },
+      { key: 'dong_dien_dong_co_vong_nuoc', label: 'Động cơ vòng nước' },
+    ],
+  },
+];
+
+function parseEntryTime(value: string | undefined): Date | null {
+  const legacy = parseTs(value);
+  if (legacy) return legacy;
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function validSamples(entries: BienDuLieuEntry[] | undefined): BienDuLieuEntry[] {
+  return (Array.isArray(entries) ? entries : []).filter((entry) => parseEntryTime(entry.thoi_gian) !== null);
+}
+
+function formatValue(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return '—';
+  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function getStats(entries: BienDuLieuEntry[], key: MetricKey) {
+  const values = entries
+    .map((entry) => Number(entry[key]))
+    .filter((value) => Number.isFinite(value));
+  if (!values.length) return { start: null, min: null, max: null, avg: null };
+  return {
+    start: values[0],
+    min: Math.min(...values),
+    max: Math.max(...values),
+    avg: values.reduce((sum, value) => sum + value, 0) / values.length,
+  };
+}
+
+function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return 'Chưa có dữ liệu';
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes} phút ${seconds} giây`;
+}
+
+function stageDuration(entries: BienDuLieuEntry[]): string {
+  if (entries.length < 2) return 'Chưa có dữ liệu';
+  const start = parseEntryTime(entries[0].thoi_gian)?.getTime() ?? 0;
+  const stop = parseEntryTime(entries[entries.length - 1].thoi_gian)?.getTime() ?? 0;
+  return formatDuration(stop - start);
+}
+
+function getConfiguredMinutes(stage: Record<string, unknown>): number | null {
+  const value = stage.thoi_gian_chay ?? stage.thoi_gian_treo_long_gd_4 ?? stage.thoi_gian_treo_long;
+  const minutes = Number(value);
+  return Number.isFinite(minutes) && minutes > 0 ? minutes : null;
 }
 
 export const BatchDetail: React.FC<BatchDetailProps> = ({ data }) => {
   const stages = [data.giai_doan_1, data.giai_doan_2, data.giai_doan_3, data.giai_doan_4];
+  const nhungLong = data.nhung_long_dau;
+
+  function snapshotValue(key: MetricKey): number | null {
+    if (!nhungLong) return null;
+    const raw = Number((nhungLong as unknown as Record<string, unknown>)[key]);
+    return Number.isFinite(raw) ? raw : null;
+  }
 
   return (
-    <div className={styles.wrapper}>
-      <h1 className={styles.mainTitle}>Dữ liệu mẻ chiên</h1>
-      <div className={styles.appContainer}>
-        {/* Summary + Averages Table */}
-        <div className={styles.topRow}>
-          {/* Left: Summary panel */}
-          <div className={styles.summaryPanel}>
-            <p className={styles.summaryItem}>
-              <b style={{ color: '#2563eb' }}>Thời gian Start:</b>
-              <span>{data.thoi_gian_start}</span>
-            </p>
-            <p className={styles.summaryItem}>
-              <b style={{ color: '#dc2626' }}>Thời gian Stop:</b>
-              <span>{data.thoi_gian_stop}</span>
-            </p>
-            <p className={styles.summaryItem}>
-              <b style={{ color: '#16a34a' }}>Tổng thời gian chạy:</b>
-              <span style={{ fontWeight: 'bold' }}>{data.tong_thoi_gian_chay} (phút)</span>
-            </p>
-            {[1, 2, 3, 4].map((g) => {
-              const gd = stages[g - 1];
-              const entries = gd?.bien_du_lieu || [];
-              return (
-                <p key={g} className={styles.summaryItem}>
-                  <b style={{ color: '#16a34a' }}>Thời gian chạy giai đoạn {g}: </b>
-                  <span style={{ fontWeight: 'bold' }}>{getStageDuration(entries)}</span>
-                </p>
-              );
-            })}
-          </div>
-
-          {/* Right: Averages table */}
-          <table className={styles.avgTable}>
-            <thead>
-              <tr className={styles.avgHeaderRow}>
-                <th className={styles.avgTh}>Tên Cảm biến</th>
-                <th className={styles.avgTh}>Gian đoạn 1</th>
-                <th className={styles.avgTh}>Gian đoạn 2</th>
-                <th className={styles.avgTh}>Gian đoạn 3</th>
-                <th className={styles.avgTh}>Gian đoạn 4</th>
-              </tr>
-            </thead>
-            <tbody>
-              {SENSOR_LABELS.map(({ key, label }, idx) => (
-                <tr key={key} style={{ background: idx % 2 === 0 ? '#f9fafb' : 'white', textAlign: 'center' }}>
-                  <td className={styles.avgTdLeft}>{label}</td>
-                  {stages.map((gd, si) => (
-                    <td key={si} className={styles.avgTd}>
-                      {computeAverage(gd?.bien_du_lieu || [], key)}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    <section className={styles.wrapper} aria-label="Chi tiết mẻ chiên">
+      <div className={styles.detailHeader}>
+        <div>
+          <p className={styles.eyebrow}>Chi tiết mẻ chiên</p>
+          <h2>{data.ma_me_chien || 'Mẻ chưa có mã'}</h2>
+          {data.ghi_chu && <p className={styles.note}>{data.ghi_chu}</p>}
         </div>
+        <div className={styles.headerMeta}>
+          <span><CalendarDays size={16} /> Bắt đầu: {data.thoi_gian_start || '—'}</span>
+          <span><CalendarDays size={16} /> Kết thúc: {data.thoi_gian_stop || 'Đang chạy'}</span>
+          <strong><Clock3 size={17} /> {formatValue(Number(data.tong_thoi_gian_chay) || 0)} phút</strong>
+        </div>
+      </div>
 
-        {/* Per-stage dump */}
-        {['giai_doan_1', 'giai_doan_2', 'giai_doan_3', 'giai_doan_4'].map((gdKey) => {
-          const stage = data[gdKey as keyof BatchDocument] as Record<string, unknown> | undefined;
-          if (!stage) return null;
+      <div className={styles.stageGrid}>
+        {stages.map((stage, index) => {
+          const samples = validSamples(stage?.bien_du_lieu);
+          const configuredMinutes = getConfiguredMinutes((stage || {}) as Record<string, unknown>);
           return (
-            <div key={gdKey} className={styles.stageDump}>
-              <h2 className={styles.stageDumpTitle}>{gdKey.replace('_', ' ').toUpperCase()}</h2>
-              <div className={styles.infoGrid}>
-                {Object.keys(stage)
-                  .filter((f) => f !== 'bien_du_lieu')
-                  .map((field) => (
-                    <div key={field} className={styles.infoItem}>
-                      <b>{field}</b>: {String(stage[field] ?? '')}
-                    </div>
-                  ))}
-              </div>
-              {Array.isArray(stage.bien_du_lieu) && (stage.bien_du_lieu as BienDuLieuEntry[]).length > 1 && (
-                <div className={styles.tableScroll}>
-                  <table className={styles.dumpTable}>
-                    <thead>
-                      <tr>
-                        {Object.keys((stage.bien_du_lieu as BienDuLieuEntry[])[0]).map((h) => (
-                          <th key={h} className={styles.dumpTh}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(stage.bien_du_lieu as BienDuLieuEntry[]).map((row, ri) => (
-                        <tr key={ri}>
-                          {Object.keys((stage.bien_du_lieu as BienDuLieuEntry[])[0]).map((h) => (
-                            <td key={h} className={styles.dumpTd}>{String(row[h] ?? '')}</td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            <article className={styles.stageCard} key={index}>
+              <div className={styles.stageHeader}>
+                <div>
+                  <p className={styles.stageLabel}>Giai đoạn {index + 1}</p>
+                  <span className={styles.sampleCount}>{samples.length} mẫu dữ liệu</span>
                 </div>
+                <div className={styles.stageTimes}>
+                  <span><Clock3 size={15} /> {stageDuration(samples)}</span>
+                  {configuredMinutes !== null && <small>Thiết lập: {formatValue(configuredMinutes)} phút</small>}
+                </div>
+              </div>
+
+              {metricGroups.map((group) => {
+                const Icon = group.icon;
+                // Chỉ giai đoạn 1 (index 0) mới có cột "Bắt đầu nhúng" (ảnh chụp M6 nhúng lòng đầu)
+                const showNhung = index === 0 && !!nhungLong;
+                const rowClass = showNhung ? `${styles.metricRow} ${styles.withNhung}` : styles.metricRow;
+                const headerClass = showNhung ? `${styles.metricRowHeader} ${styles.withNhung}` : styles.metricRowHeader;
+                return (
+                  <section className={`${styles.metricGroup} ${styles[group.tone]}`} key={group.title}>
+                    <h3><Icon size={17} strokeWidth={2.2} /> {group.title}</h3>
+                    <div className={styles.metricTable}>
+                      <div className={headerClass}>
+                        <span>Thông số</span>
+                        {showNhung && <span>Bắt đầu nhúng</span>}
+                        <span>Bắt đầu</span><span>Thấp nhất</span><span>Cao nhất</span><span>Trung bình</span>
+                      </div>
+                      {group.metrics.map((metric) => {
+                        const stats = getStats(samples, metric.key);
+                        return (
+                          <div className={rowClass} key={metric.key}>
+                            <span>{metric.label}</span>
+                            {showNhung && <b>{formatValue(snapshotValue(metric.key))}</b>}
+                            <b>{formatValue(stats.start)}</b>
+                            <b>{formatValue(stats.min)}</b>
+                            <b>{formatValue(stats.max)}</b>
+                            <b>{formatValue(stats.avg)}</b>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+                );
+              })}
+
+              {!samples.length && (
+                <div className={styles.emptyStage}><Activity size={18} /> Chưa có mẫu dữ liệu cho giai đoạn này.</div>
               )}
-            </div>
+            </article>
           );
         })}
       </div>
-    </div>
+    </section>
   );
 };

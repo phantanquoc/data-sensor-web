@@ -16,6 +16,7 @@ export interface FryerStatus {
   stage: number | null;    // current active stage (1..4) or null
   elapsedMs: number;       // active-stage elapsed (server-authoritative)
   targetMin: number;       // active-stage target minutes
+  targetTemperature: number | null; // active-stage temperature setpoint (stages 1..3)
   tongThoiGian: number;    // total run time (phút)
   sensor: SensorData | null;
 }
@@ -26,6 +27,7 @@ const EMPTY: Omit<FryerStatus, 'n'> = {
   stage: null,
   elapsedMs: 0,
   targetMin: 0,
+  targetTemperature: null,
   tongThoiGian: 0,
   sensor: null,
 };
@@ -39,6 +41,13 @@ function targetOf(stage: StagePayload, stageNum: number): number {
     return Number((stage.set_giai_doan as SetGiaiDoanStages123).thoi_gian_chay) || 0;
   }
   return Number((stage.set_giai_doan as SetGiaiDoanStage4).thoi_gian_treo_long) || 0;
+}
+
+function targetTemperatureOf(stage: StagePayload, stageNum: number): number | null {
+  if (stageNum > 3) return null;
+
+  const target = Number((stage.set_giai_doan as SetGiaiDoanStages123).nhiet_do_cai_dat);
+  return Number.isFinite(target) ? target : null;
 }
 
 /**
@@ -93,13 +102,22 @@ export function useAllFryers(): FryerStatus[] {
           stage: stageNum,
           elapsedMs: elapsedMs ?? 0,
           targetMin: activeStage && stageNum ? targetOf(activeStage, stageNum) : 0,
+          targetTemperature: activeStage && stageNum
+            ? targetTemperatureOf(activeStage, stageNum)
+            : null,
           tongThoiGian: Number(stages[0]?.tong_thoi_gian_chay) || 0,
           sensor: (sensorSource?.data as SensorData) ?? null,
         });
       };
 
       const onStop = () => {
-        patch({ running: false, stage: null, elapsedMs: 0, targetMin: 0 });
+        patch({
+          running: false,
+          stage: null,
+          elapsedMs: 0,
+          targetMin: 0,
+          targetTemperature: null,
+        });
       };
 
       socket.on(`noi_chien_${n}_data`, onData as (...args: unknown[]) => void);

@@ -3,8 +3,11 @@ import { Overview } from './pages/Overview';
 import { FryerDetail } from './pages/FryerDetail';
 
 function App() {
+  const baseUrl = import.meta.env.BASE_URL;
+  const basename = baseUrl === '/' ? undefined : baseUrl.replace(/\/$/, '');
+
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={basename}>
       <Routes>
         <Route path="/" element={<Overview />} />
         <Route path="/may/:n" element={<FryerDetail />} />

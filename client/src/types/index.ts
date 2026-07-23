@@ -22,9 +22,20 @@ export interface SetGiaiDoanStages123 {
   vi_tri_muc_dau: string | number;
 }
 
-/** set_giai_doan for stage 4 (only thoi_gian_treo_long) */
+/** Ảnh chụp full sensor tại thời điểm M6 lên true lần đầu trong mẻ (nhúng lòng đầu) */
+export interface NhungLongDau extends SensorData {
+  thoi_gian: string;
+  thoi_gian_at?: string | null;
+  /** Số giây từ lúc M120 start đến khi nhận M6 on lần đầu */
+  giay_tu_start?: number | null;
+  /** Số giây từ lúc M120 start đến khi vào GĐ1 (M155 on lần đầu) */
+  giay_vao_gd1?: number | null;
+}
+
+/** set_giai_doan for stage 4 (thoi_gian_treo_long + ảnh chụp nhúng lòng đầu) */
 export interface SetGiaiDoanStage4 {
   thoi_gian_treo_long: number;
+  nhung_long_dau?: NhungLongDau | null;
 }
 
 /** A single stage payload as emitted in the noi_chien_N_data array */
@@ -49,9 +60,15 @@ export interface NoiChienDataPayload {
 /** Batch list item (lean projection from GET /get_noi_chien) */
 export interface BatchListItem {
   _id: string;
+  ma_me_chien: string;
+  ghi_chu: string;
   thoi_gian_start: string;
   thoi_gian_stop: string;
+  thoi_gian_start_at?: string | null;
+  thoi_gian_stop_at?: string | null;
+  tong_thoi_gian_chay: number;
   dong_ep_khoi_dong?: boolean;
+  trang_thai?: 'running' | 'completed' | 'forced';
 }
 
 /** bien_du_lieu entry for stages 1-3 */
@@ -99,6 +116,8 @@ export interface BatchStage4 {
 /** Full batch document from GET /get_noi_chien_detail */
 export interface BatchDocument {
   _id: string;
+  ma_me_chien: string;
+  ghi_chu: string;
   thoi_gian_start: string;
   thoi_gian_stop: string;
   tong_thoi_gian_chay: number;
@@ -106,5 +125,6 @@ export interface BatchDocument {
   giai_doan_2: BatchStage123;
   giai_doan_3: BatchStage123;
   giai_doan_4: BatchStage4;
+  nhung_long_dau?: NhungLongDau | null;
   [key: string]: unknown;
 }

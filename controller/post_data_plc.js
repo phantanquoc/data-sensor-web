@@ -1,4 +1,5 @@
 const { Buffer } = require("buffer");
+const { formatVietnamTimestamp, formatVietnamDateCode } = require("../utils/time");
 
 const DEBUG = process.env.DEBUG === "true" || process.env.DEBUG === "1";
 function dbg(...args) { if (DEBUG) console.log(...args); }
@@ -19,6 +20,24 @@ const latestStages = {};
 // legitimately restarts rather than being recovered.
 // stageStartMs[n] = { 1: ms|null, 2: ms|null, 3: ms|null, 4: ms|null }
 const stageStartMs = {};
+
+// M6 (đèn nhúng lòng) rising-edge tracking + ảnh chụp nhúng lòng đầu, per-fryer.
+// m6Prev[n]: trạng thái M6 chu kỳ trước (bắt sườn lên).
+// nhungLongDau[n]: snapshot đã chụp cho mẻ hiện tại (null = chưa chụp). Reset ở đầu mẻ.
+const m6Prev = {};
+const nhungLongDau = {};
+// batchStartMs[n]: mốc M120 bắt đầu mẻ (ms) — để tính số giây từ start đến M6 on lần đầu.
+const batchStartMs = {};
+// M155 (vào Giai đoạn 1) rising-edge tracking, per-fryer.
+// m155Prev[n]: trạng thái M155 chu kỳ trước (bắt sườn lên).
+// giayVaoGd1[n]: số giây từ M120 start → M155 on lần đầu trong mẻ (null = chưa vào GĐ1). Reset ở đầu mẻ.
+const m155Prev = {};
+const giayVaoGd1 = {};
+
+function temporaryBatchCode(n, startedAt, id) {
+  const datePart = formatVietnamDateCode(startedAt);
+  return `NC${n}-${datePart}-${String(id).slice(-6).toUpperCase()}`;
+}
 
 /**
  * postDataPlc - single parameterized function replacing the 8 post_data_to_db_* files.
@@ -155,9 +174,14 @@ exports.postDataPlc = async (
     values && values["D214"] !== undefined ? values["D214"] : 0;
 
   // --- Document initial shape ---
+  const batchStartedAt = new Date();
   const dataFormat = {
-    thoi_gian_start: new Date().toLocaleString("vi-VN"),
+    ma_me_chien: "",
+    ghi_chu: "",
+    thoi_gian_start: formatVietnamTimestamp(batchStartedAt),
     thoi_gian_stop: "",
+    thoi_gian_start_at: batchStartedAt,
+    thoi_gian_stop_at: null,
     tong_thoi_gian_chay: 0,
     giai_doan_1: {
       thoi_gian_chay: 0,
@@ -265,7 +289,7 @@ exports.postDataPlc = async (
   };
 
   const newData_gd_1 = {
-    thoi_gian: new Date().toLocaleString("vi-VN"),
+    thoi_gian: formatVietnamTimestamp(),
     ap_suat_vo_hoi: d_2_3,
     ap_suat_chan_khong: d_4_5,
     ap_suat_vong_nuoc: d_81_82,
@@ -284,7 +308,7 @@ exports.postDataPlc = async (
   };
 
   const newData_gd_2 = {
-    thoi_gian: new Date().toLocaleString("vi-VN"),
+    thoi_gian: formatVietnamTimestamp(),
     ap_suat_vo_hoi: d_2_3,
     ap_suat_chan_khong: d_4_5,
     ap_suat_vong_nuoc: d_81_82,
@@ -303,7 +327,7 @@ exports.postDataPlc = async (
   };
 
   const newData_gd_3 = {
-    thoi_gian: new Date().toLocaleString("vi-VN"),
+    thoi_gian: formatVietnamTimestamp(),
     ap_suat_vo_hoi: d_2_3,
     ap_suat_chan_khong: d_4_5,
     ap_suat_vong_nuoc: d_81_82,
@@ -322,7 +346,7 @@ exports.postDataPlc = async (
   };
 
   const newData_gd_4 = {
-    thoi_gian: new Date().toLocaleString("vi-VN"),
+    thoi_gian: formatVietnamTimestamp(),
     ap_suat_vo_hoi: d_2_3,
     ap_suat_chan_khong: d_4_5,
     ap_suat_vong_nuoc: d_81_82,
@@ -361,6 +385,49 @@ exports.postDataPlc = async (
       break;
     }
   }
+
+  // --- M155 (vào Giai đoạn 1) rising edge → ghi số giây từ M120 start → vào GĐ1 (1 lần/mẻ) ---
+  const m155Now = giai_doan_1 === true;
+  if (Start > 1 && m155Now && !m155Prev[n] && giayVaoGd1[n] == null && batchStartMs[n] != null) {
+    giayVaoGd1[n] = Math.max(0, Math.round((Date.now() - batchStartMs[n]) / 1000));
+  }
+  m155Prev[n] = m155Now;
+
+  // --- M6 (đèn nhúng lòng) rising edge → chụp ảnh full sensor nhúng lòng đầu (1 lần/mẻ) ---
+  const m6Now = values && values["M6"] === true;
+  // Chỉ chụp khi mẻ đang chạy (Start>1): lúc đó document đã tạo và state đã reset cho mẻ này.
+  // Trên cycle Start===1, document chưa tạo và id_document[n] còn của mẻ trước.
+  if (Start > 1 && m6Now && !m6Prev[n] && !nhungLongDau[n] && id_document[n]) {
+    const capturedAt = new Date();
+    // Số giây từ lúc M120 start đến khi nhận M6 on lần đầu
+    const giay_tu_start =
+      batchStartMs[n] != null
+        ? Math.max(0, Math.round((capturedAt.getTime() - batchStartMs[n]) / 1000))
+        : null;
+    const snapshot = {
+      thoi_gian: formatVietnamTimestamp(capturedAt),
+      thoi_gian_at: capturedAt,
+      giay_tu_start,
+      // Số giây từ M120 start → vào GĐ1 (M155 on lần đầu). Để so sánh với giay_tu_start (mốc M6).
+      giay_vao_gd1: giayVaoGd1[n] != null ? giayVaoGd1[n] : null,
+      ap_suat_vo_hoi: d_2_3,
+      ap_suat_chan_khong: d_4_5,
+      ap_suat_vong_nuoc: d_81_82,
+      nhiet_do: d_134_135,
+      dong_dien_dong_co_root: d_575_576,
+      dong_dien_dong_co_vong_nuoc: d_571_572,
+      nhiet_do_vao_binh_sinh_han: d84 / 10,
+      nhiet_do_ra_binh_sinh_han: d85 / 10,
+      nhiet_do_vao_bom_vong_nuoc: d86 / 10,
+      nhiet_do_ra_bom_vong_nuoc: d87 / 10,
+    };
+    nhungLongDau[n] = snapshot;
+    model
+      .updateOne({ _id: id_document[n] }, { $set: { nhung_long_dau: snapshot } })
+      .catch((err) => console.log(err));
+    dbg("nồi chiên " + n + " chụp nhúng lòng đầu");
+  }
+  m6Prev[n] = m6Now;
 
   // --- Emit realtime data BEFORE DB writes (socket not blocked by Mongo) ---
   const stagesArray = [
@@ -413,6 +480,7 @@ exports.postDataPlc = async (
       tong_thoi_gian_chay: d60,
       set_giai_doan: {
         thoi_gian_treo_long: thoi_gian_treo_long_gd4,
+        nhung_long_dau: nhungLongDau[n] || null,
       },
     },
   ];
@@ -423,18 +491,37 @@ exports.postDataPlc = async (
   // khởi tạo
   if (Start === 1) {
     // Đóng mọi mẻ chưa stop cũ của nồi này trước khi tạo mẻ mới
+    const staleStoppedAt = new Date();
     await model.updateMany(
       { thoi_gian_stop: "" },
-      { $set: { thoi_gian_stop: new Date().toLocaleString("vi-VN") } },
+      {
+        $set: {
+          thoi_gian_stop: formatVietnamTimestamp(staleStoppedAt),
+          thoi_gian_stop_at: staleStoppedAt,
+        },
+      },
     ).catch((err) => console.log(err));
 
     const docunent = await model.create(dataFormat).catch((err) => {
       console.log(err);
     });
     if (docunent) {
+      await model.updateOne(
+        { _id: docunent._id },
+        { $set: { ma_me_chien: temporaryBatchCode(n, batchStartedAt, docunent._id) } },
+      ).catch((err) => console.log(err));
       id_document[n] = docunent._id;
       pushCount[n] = { 1: 0, 2: 0, 3: 0, 4: 0 };
       stageStartMs[n] = { 1: null, 2: null, 3: null, 4: null };
+      // Mẻ mới → xóa ảnh chụp nhúng lòng cũ để chụp lại lần M6 lên đầu tiên của mẻ này.
+      // Reset m6Prev để lần M6=true đầu tiên của mẻ mới luôn tính là sườn lên.
+      nhungLongDau[n] = null;
+      m6Prev[n] = false;
+      // Reset mốc vào GĐ1 (M155) để bắt sườn lên lần đầu của mẻ mới.
+      m155Prev[n] = false;
+      giayVaoGd1[n] = null;
+      // Mốc bắt đầu mẻ để tính số giây từ M120 start → M6 on lần đầu
+      batchStartMs[n] = batchStartedAt.getTime();
     }
   }
   // update
@@ -526,11 +613,13 @@ exports.postDataPlc = async (
 
   // update stop — flush final values + set thoi_gian_stop
   if (Start === 0) {
+    const batchStoppedAt = new Date();
     await model.updateOne(
       { _id: id_document[n] },
       {
         $set: {
-          thoi_gian_stop: new Date().toLocaleString("vi-VN"),
+          thoi_gian_stop: formatVietnamTimestamp(batchStoppedAt),
+          thoi_gian_stop_at: batchStoppedAt,
           tong_thoi_gian_chay: d60,
           "giai_doan_1.thoi_gian_chay": thoi_gian_chay_gd1,
           "giai_doan_1.so_lan_nhung": so_lan_nhung_gd1,

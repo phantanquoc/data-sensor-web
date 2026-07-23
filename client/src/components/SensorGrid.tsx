@@ -1,33 +1,76 @@
 import React from 'react';
+import { Clock3, Gauge, Thermometer, Zap } from 'lucide-react';
+import { isTemperatureWarning } from '../constants';
 import styles from './SensorGrid.module.css';
 import type { SensorData } from '../types';
 
 interface SensorGridProps {
   data: SensorData;
+  tongThoiGian: number;
+  temperatureTarget: number | null;
 }
 
-const SENSOR_LABELS: { key: keyof SensorData; label: string }[] = [
-  { key: 'ap_suat_vo_hoi', label: 'Áp suất vỏ hơi' },
-  { key: 'ap_suat_chan_khong', label: 'Áp suất chân không' },
-  { key: 'ap_suat_vong_nuoc', label: 'Áp suất vòng nước' },
-  { key: 'nhiet_do', label: 'Nhiệt độ' },
-  { key: 'dong_dien_dong_co_root', label: 'Dòng điện động cơ Root' },
-  { key: 'dong_dien_dong_co_vong_nuoc', label: 'Dòng điện động cơ vòng nước' },
-  { key: 'nhiet_do_vao_binh_sinh_han', label: 'Nhiệt độ vào bình sinh hàn' },
-  { key: 'nhiet_do_ra_binh_sinh_han', label: 'Nhiệt độ ra bình sinh hàn' },
-  { key: 'nhiet_do_vao_bom_vong_nuoc', label: 'Nhiệt độ vào động cơ vòng nước' },
-  { key: 'nhiet_do_ra_bom_vong_nuoc', label: 'Nhiệt độ ra động cơ vòng nước' },
-];
+interface MetricProps {
+  label: string;
+  value: number;
+  target?: number | null;
+  warning?: boolean;
+}
 
-export const SensorGrid: React.FC<SensorGridProps> = ({ data }) => {
+const Metric: React.FC<MetricProps> = ({ label, value, target, warning = false }) => (
+  <div className={`${styles.metric} ${warning ? styles.warningMetric : ''}`}>
+    <span className={styles.metricLabel}>{label}</span>
+    <strong className={styles.metricValue}>
+      {value}{target != null ? `/${target}` : ''}
+    </strong>
+  </div>
+);
+
+export const SensorGrid: React.FC<SensorGridProps> = ({ data, tongThoiGian, temperatureTarget }) => {
+  const temperatureWarning = isTemperatureWarning(data.nhiet_do, temperatureTarget);
+
   return (
-    <div className={styles.sensorGrid}>
-      {SENSOR_LABELS.map(({ key, label }) => (
-        <div key={key} className={styles.sensorCard}>
-          <span className={styles.label}>{label}</span>
-          <span className={styles.value}>{data[key]}</span>
+    <section className={styles.sensorSection} aria-label="Thông số hệ thống">
+      <header className={styles.cardHeader}>
+        <h3>Thông số hệ thống</h3>
+        <span className={styles.totalTime}>
+          <Clock3 size={15} aria-hidden="true" />
+          <span>Thời gian: <b>{tongThoiGian}</b> phút</span>
+        </span>
+      </header>
+
+      <div className={`${styles.metricSection} ${styles.temperatureSection}`}>
+        <h4><Thermometer size={15} aria-hidden="true" /> Nhiệt độ</h4>
+        <div className={styles.metricGrid}>
+          <Metric
+            label="Nhiệt độ chiên"
+            value={data.nhiet_do}
+            target={temperatureTarget}
+            warning={temperatureWarning}
+          />
+          <Metric label="Vào bình sinh hàn" value={data.nhiet_do_vao_binh_sinh_han} />
+          <Metric label="Ra bình sinh hàn" value={data.nhiet_do_ra_binh_sinh_han} />
+          <Metric label="Vào động cơ vòng nước" value={data.nhiet_do_vao_bom_vong_nuoc} />
+          <Metric label="Ra động cơ vòng nước" value={data.nhiet_do_ra_bom_vong_nuoc} />
         </div>
-      ))}
-    </div>
+      </div>
+
+      <div className={`${styles.metricSection} ${styles.pressureSection}`}>
+        <h4><Gauge size={15} aria-hidden="true" /> Áp suất</h4>
+        <div className={styles.metricGrid}>
+          <Metric label="Vỏ hơi" value={data.ap_suat_vo_hoi} />
+          <Metric label="Chân không" value={data.ap_suat_chan_khong} />
+          <Metric label="Vòng nước" value={data.ap_suat_vong_nuoc} />
+        </div>
+      </div>
+
+      <div className={`${styles.metricSection} ${styles.currentSection}`}>
+        <h4><Zap size={15} aria-hidden="true" /> Dòng điện</h4>
+        <div className={styles.metricGrid}>
+          <Metric label="Động cơ Root" value={data.dong_dien_dong_co_root} />
+          <Metric label="Động cơ vòng nước" value={data.dong_dien_dong_co_vong_nuoc} />
+        </div>
+      </div>
+    </section>
   );
 };

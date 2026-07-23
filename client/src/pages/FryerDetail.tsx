@@ -4,12 +4,12 @@ import { TabBar } from '../components/TabBar';
 import { StageColumn } from '../components/StageColumn';
 import { SensorGrid } from '../components/SensorGrid';
 import { BatchList } from '../components/BatchList';
-import { BatchDetail } from '../components/BatchDetail';
+import { BatchDetailDrawer } from '../components/BatchDetailDrawer';
 import { Toast } from '../components/Toast';
 import { useSocket } from '../hooks/useSocket';
 import { useFryerData } from '../hooks/useFryerData';
-import { getNoiChien, getNoiChienDetail, xoaNoiChienDetail } from '../api';
-import type { StagePayload, SensorData } from '../types';
+import { getNoiChien, getNoiChienDetail, suaNoiChienDetail, xoaNoiChienDetail } from '../api';
+import type { StagePayload, SensorData, SetGiaiDoanStages123 } from '../types';
 import styles from '../App.module.css';
 
 const ZERO_SENSOR: SensorData = {
@@ -39,6 +39,7 @@ export const FryerDetail: React.FC = () => {
     batchDetail,
     setBatchDetail,
     donut,
+    stageElapsedMsByStage,
     resetView,
     handleDataEvent,
     autoLoad,
@@ -67,8 +68,8 @@ export const FryerDetail: React.FC = () => {
     autoLoad(Number(soNoiChien));
   }, [soNoiChien, autoLoad, resetView, setBatchList, setBatchDetail]);
 
-  const handleRefreshBatchList = useCallback(async () => {
-    const docs = await getNoiChien(Number(soNoiChien));
+  const handleRefreshBatchList = useCallback(async (filters: { from?: string; to?: string } = {}) => {
+    const docs = await getNoiChien(Number(soNoiChien), filters);
     setBatchList(docs);
   }, [soNoiChien, setBatchList]);
 
@@ -80,9 +81,21 @@ export const FryerDetail: React.FC = () => {
   const handleDeleteBatch = useCallback(async (id: string) => {
     await xoaNoiChienDetail(id, Number(soNoiChien));
     setToastMsg('Đã xóa mẻ chiên');
+    setBatchDetail((current) => current?._id === id ? null : current);
     const docs = await getNoiChien(Number(soNoiChien));
     setBatchList(docs);
-  }, [soNoiChien, setBatchList]);
+  }, [soNoiChien, setBatchDetail, setBatchList]);
+
+  const handleEditBatch = useCallback(async (
+    id: string,
+    values: { ma_me_chien: string; ghi_chu: string },
+  ) => {
+    await suaNoiChienDetail(id, Number(soNoiChien), values);
+    setToastMsg('Đã cập nhật mẻ chiên');
+    setBatchDetail((current) => current?._id === id ? { ...current, ...values } : current);
+    const docs = await getNoiChien(Number(soNoiChien));
+    setBatchList(docs);
+  }, [soNoiChien, setBatchDetail, setBatchList]);
 
   const clearToast = useCallback(() => setToastMsg(null), []);
 
@@ -91,6 +104,10 @@ export const FryerDetail: React.FC = () => {
   const sensorData: SensorData = activeStageIdx >= 0
     ? stages[activeStageIdx].data as SensorData
     : stages[0].data as SensorData ?? ZERO_SENSOR;
+
+  const activeTemperatureTarget = activeStageIdx >= 0 && activeStageIdx < 3
+    ? Number((stages[activeStageIdx].set_giai_doan as SetGiaiDoanStages123).nhiet_do_cai_dat) || null
+    : null;
 
   // tong_thoi_gian_chay from the first non-zero stage
   const tongThoiGian = stages[0]?.tong_thoi_gian_chay ?? 0;
@@ -106,14 +123,9 @@ export const FryerDetail: React.FC = () => {
               <span>Hệ Chiên </span>
               <span>{soNoiChien}</span>
             </div>
-            <div className={styles.timeDisplay}>
-              <span style={{ color: '#1f8836' }}>
-                Thời gian: <span style={{ color: '#a5a728' }}>{tongThoiGian}</span> phút
-              </span>
-            </div>
           </h2>
 
-          <div className={styles.stagesRow}>
+          <div className={styles.detailCardsRow}>
             {stages.map((stage, idx) => (
               <StageColumn
                 key={idx}
@@ -123,22 +135,28 @@ export const FryerDetail: React.FC = () => {
                 donutReceivedAt={donut.stage === idx + 1 ? donut.receivedAt : 0}
                 donutTargetMin={donut.stage === idx + 1 ? donut.targetMin : 0}
                 activeDonutStage={donut.stage}
+                completedElapsedMs={stageElapsedMsByStage[idx + 1] ?? null}
               />
             ))}
-          </div>
 
-          <SensorGrid data={sensorData} />
+            <SensorGrid
+              data={sensorData}
+              tongThoiGian={tongThoiGian}
+              temperatureTarget={activeTemperatureTarget}
+            />
+          </div>
         </div>
       </div>
 
       <BatchList
         batchList={batchList}
         onView={handleViewBatch}
+        onEdit={handleEditBatch}
         onDelete={handleDeleteBatch}
         onRefresh={handleRefreshBatchList}
       />
 
-      {batchDetail && <BatchDetail data={batchDetail} />}
+      {batchDetail && <BatchDetailDrawer data={batchDetail} onClose={() => setBatchDetail(null)} />}
 
       <Toast message={toastMsg} onDone={clearToast} />
     </div>

@@ -2,6 +2,16 @@ const mongoose = require("mongoose");
 const Schema = mongoose.Schema;
 
 const plcSchema = new Schema({
+  ma_me_chien: {
+    type: String,
+    default: "",
+    trim: true,
+  },
+  ghi_chu: {
+    type: String,
+    default: "",
+    trim: true,
+  },
   thoi_gian_start: {
     type: String,
     require: true,
@@ -9,6 +19,14 @@ const plcSchema = new Schema({
   thoi_gian_stop: {
     type: String,
     require: true,
+  },
+  // Normalized timestamps for filtering/sorting; legacy string fields remain
+  // the display/source-of-truth format for backward compatibility.
+  thoi_gian_start_at: {
+    type: Date,
+  },
+  thoi_gian_stop_at: {
+    type: Date,
   },
   // Cờ đánh dấu mẻ bị đóng ép do khởi động lại hệ thống
   dong_ep_khoi_dong: {
@@ -429,6 +447,36 @@ const plcSchema = new Schema({
         },
       },
     ],
+  },
+  // Ảnh chụp thông số tại thời điểm M6 (đèn nhúng lòng) lên true LẦN ĐẦU trong mẻ.
+  // Ghi đúng 1 lần/mẻ. thoi_gian (chuỗi VN) để hiển thị, thoi_gian_at (Date) để sort/filter.
+  nhung_long_dau: {
+    thoi_gian: { type: String, default: "" },
+    thoi_gian_at: { type: Date, default: null },
+    // Số giây từ lúc M120 start đến khi nhận M6 on lần đầu
+    giay_tu_start: { type: Number, default: null },
+    // Số giây từ lúc M120 start đến khi vào GĐ1 (M155 on lần đầu) — để so sánh mốc
+    giay_vao_gd1: { type: Number, default: null },
+    // D2
+    ap_suat_vo_hoi: { type: Number, default: 0 },
+    // D4
+    ap_suat_chan_khong: { type: Number, default: 0 },
+    // D81
+    ap_suat_vong_nuoc: { type: Number, default: 0 },
+    // D134
+    nhiet_do: { type: Number, default: 0 },
+    // D575
+    dong_dien_dong_co_root: { type: Number, default: 0 },
+    // D571
+    dong_dien_dong_co_vong_nuoc: { type: Number, default: 0 },
+    // D84
+    nhiet_do_vao_binh_sinh_han: { type: Number, default: 0 },
+    // D85
+    nhiet_do_ra_binh_sinh_han: { type: Number, default: 0 },
+    // D86
+    nhiet_do_vao_bom_vong_nuoc: { type: Number, default: 0 },
+    // D87
+    nhiet_do_ra_bom_vong_nuoc: { type: Number, default: 0 },
   },
 });
 

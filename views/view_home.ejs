@@ -1923,15 +1923,15 @@
               reset_realTimer_he_chien(soN, data_reset);
               return;
             }
-            // 2) Chọn mẻ đang chạy MỚI NHẤT (duyệt ngược), nếu không có thì lấy mẻ mới nhất
+            // API trả về mẻ mới nhất trước: lấy mẻ đang chạy đầu tiên, nếu không có thì lấy phần tử đầu.
             var running = null;
-            for (var i = documents.length - 1; i >= 0; i--) {
+            for (var i = 0; i < documents.length; i++) {
               if (documents[i].thoi_gian_stop === "" || documents[i].thoi_gian_stop == null) {
                 running = documents[i];
                 break;
               }
             }
-            const chosen = running || documents[documents.length - 1];
+            const chosen = running || documents[0];
             // 3) Fetch full document của mẻ được chọn để dựng realtime
             fetch(`/get_noi_chien_detail?id=${chosen._id}&so_noiChien=${Number(n)}`)
               .then((res2) => res2.json())
@@ -1997,8 +1997,10 @@
       // Consolidated socket handlers: one data + one stop handler per fryer
       for (let _n = 1; _n <= 8; _n++) {
         (function(fryer) {
-          socket.on("noi_chien_" + fryer + "_data", (stagesArray) => {
+          socket.on("noi_chien_" + fryer + "_data", (payload) => {
             if (so_noiChien === String(fryer)) {
+              const stagesArray = Array.isArray(payload) ? payload : payload && payload.stages;
+              if (!Array.isArray(stagesArray)) return;
               for (let i = 0; i < stagesArray.length; i++) {
                 realTimer_he_chien(so_noiChien, stagesArray[i]);
               }

@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Flame, Power, Thermometer, Gauge, Zap, ChevronRight } from 'lucide-react';
 import type { FryerStatus } from '../hooks/useAllFryers';
+import { isTemperatureWarning } from '../constants';
 
 const STAGE_LABEL: Record<number, string> = {
   1: 'Giai đoạn 1',
@@ -14,12 +15,69 @@ interface MachineCardProps {
   status: FryerStatus;
 }
 
-export const MachineCard: React.FC<MachineCardProps> = ({ status }) => {
-  const { n, connected, running, stage, elapsedMs, targetMin, tongThoiGian, sensor } = status;
+const TIMER_STEP_MS = 2000;
 
-  const elapsedMin = elapsedMs / 60000;
+function quantizeElapsed(elapsedMs: number): number {
+  return Math.floor(Math.max(0, elapsedMs) / TIMER_STEP_MS) * TIMER_STEP_MS;
+}
+
+function formatElapsedClock(elapsedMs: number): string {
+  const totalSeconds = Math.floor(Math.max(0, elapsedMs) / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+function useSteppedElapsed(running: boolean, stage: number | null, serverElapsedMs: number): number {
+  const anchorRef = useRef({ stage, elapsedMs: serverElapsedMs, receivedAt: Date.now() });
+  const [displayElapsedMs, setDisplayElapsedMs] = useState(() => quantizeElapsed(serverElapsedMs));
+
+  useEffect(() => {
+    const previousStage = anchorRef.current.stage;
+    anchorRef.current = { stage, elapsedMs: serverElapsedMs, receivedAt: Date.now() };
+
+    if (!running) {
+      setDisplayElapsedMs(0);
+    } else if (previousStage !== stage) {
+      setDisplayElapsedMs(quantizeElapsed(serverElapsedMs));
+    }
+  }, [running, stage, serverElapsedMs]);
+
+  useEffect(() => {
+    if (!running) return undefined;
+
+    const tick = () => {
+      const anchor = anchorRef.current;
+      const projected = anchor.elapsedMs + (Date.now() - anchor.receivedAt);
+      setDisplayElapsedMs(quantizeElapsed(projected));
+    };
+
+    tick();
+    const timer = window.setInterval(tick, TIMER_STEP_MS);
+    return () => window.clearInterval(timer);
+  }, [running, stage]);
+
+  return displayElapsedMs;
+}
+
+export const MachineCard: React.FC<MachineCardProps> = ({ status }) => {
+  const {
+    n,
+    connected,
+    running,
+    stage,
+    elapsedMs,
+    targetMin,
+    targetTemperature,
+    tongThoiGian,
+    sensor,
+  } = status;
+
+  const displayElapsedMs = useSteppedElapsed(running, stage, elapsedMs);
+  const elapsedMin = displayElapsedMs / 60000;
   const isOvertime = targetMin > 0 && elapsedMin > targetMin;
   const pct = targetMin > 0 ? Math.min((elapsedMin / targetMin) * 100, 100) : 0;
+  const temperatureWarning = isTemperatureWarning(sensor?.nhiet_do, targetTemperature);
 
   const statusLabel = !connected ? 'Mất kết nối' : running ? 'Đang chạy' : 'Dừng';
   const badgeClasses = !connected
@@ -36,17 +94,17 @@ export const MachineCard: React.FC<MachineCardProps> = ({ status }) => {
   return (
     <Link
       to={`/may/${n}`}
-      className="group flex flex-col gap-4 rounded-2xl bg-gradient-to-br from-white to-[#f2f8ff] p-5 shadow-card transition duration-200 hover:-translate-y-1 hover:shadow-cardHover focus:outline-none focus:ring-2 focus:ring-brand"
+      className="group flex min-h-[280px] flex-col gap-5 rounded-2xl bg-gradient-to-br from-white to-[#f2f8ff] p-6 shadow-card transition duration-200 hover:-translate-y-1 hover:shadow-cardHover focus:outline-none focus:ring-2 focus:ring-brand"
     >
       {/* Header: name + status badge */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
           <span
-            className={`grid h-9 w-9 place-items-center rounded-xl ${
+            className={`grid h-10 w-10 place-items-center rounded-xl ${
               running ? 'bg-brand text-white' : 'bg-gray-100 text-gray-400'
             }`}
           >
-            <Flame size={18} />
+            <Flame size={20} />
           </span>
           <span className="text-lg font-bold text-stage">Hệ Chiên {n}</span>
         </div>
@@ -70,14 +128,14 @@ export const MachineCard: React.FC<MachineCardProps> = ({ status }) => {
       </div>
 
       {/* Horizontal progress bar */}
-      <div className="flex flex-col gap-1">
+      <div className="flex flex-col gap-1.5">
         <div className="flex items-center justify-between text-xs text-gray-500">
           <span>Thời gian chạy</span>
           <span className="font-semibold">
             {running ? (
               <>
                 <b className={isOvertime ? 'text-val-orange' : 'text-val-blue'}>
-                  {elapsedMin.toFixed(1)}
+                  {formatElapsedClock(displayElapsedMs)}
                 </b>
                 {' / '}
                 {targetMin > 0 ? Math.round(targetMin) : '--'} phút
@@ -97,11 +155,38 @@ export const MachineCard: React.FC<MachineCardProps> = ({ status }) => {
         </div>
       </div>
 
-      {/* Key sensors */}
-      <div className="grid grid-cols-3 gap-2 border-t border-gray-100 pt-3">
-        <Metric icon={<Thermometer size={14} />} label="Nhiệt độ" value={sensor?.nhiet_do} />
-        <Metric icon={<Gauge size={14} />} label="Áp CK" value={sensor?.ap_suat_chan_khong} />
-        <Metric icon={<Zap size={14} />} label="Dòng Root" value={sensor?.dong_dien_dong_co_root} />
+      {/* Key sensors — 2×2 grid */}
+      <div className="grid grid-cols-2 gap-3 border-t border-gray-100 pt-3">
+        <Metric
+          icon={<Thermometer size={13} />}
+          label="Nhiệt độ"
+          value={sensor?.nhiet_do}
+          targetValue={targetTemperature}
+          warning={temperatureWarning}
+          unit="°C"
+          color="red"
+        />
+        <Metric
+          icon={<Gauge size={13} />}
+          label="Áp CK"
+          value={sensor?.ap_suat_chan_khong}
+          unit="bar"
+          color="teal"
+        />
+        <Metric
+          icon={<Zap size={13} />}
+          label="Dòng Root"
+          value={sensor?.dong_dien_dong_co_root}
+          unit="A"
+          color="orange"
+        />
+        <Metric
+          icon={<Zap size={13} />}
+          label="Dòng vòng nước"
+          value={sensor?.dong_dien_dong_co_vong_nuoc}
+          unit="A"
+          color="orange"
+        />
       </div>
 
       <span className="inline-flex items-center gap-1 text-xs font-semibold text-brand opacity-0 transition group-hover:opacity-100">
@@ -111,18 +196,47 @@ export const MachineCard: React.FC<MachineCardProps> = ({ status }) => {
   );
 };
 
-const Metric: React.FC<{ icon: React.ReactNode; label: string; value?: number }> = ({
-  icon,
-  label,
-  value,
-}) => (
-  <div className="flex flex-col items-center gap-0.5 text-center">
-    <span className="inline-flex items-center gap-1 text-[11px] text-gray-500">
-      {icon}
-      {label}
-    </span>
-    <span className="text-base font-bold text-brand-dark">
-      {value != null ? value : '--'}
-    </span>
-  </div>
-);
+/** Color maps — val.* semantic palette from tailwind.config / ui-dna */
+const COLOR_CLASSES: Record<string, { icon: string; value: string }> = {
+  red:    { icon: 'text-val-red',    value: 'text-val-red'    },
+  teal:   { icon: 'text-val-teal',   value: 'text-val-teal'   },
+  orange: { icon: 'text-val-orange', value: 'text-val-orange' },
+  blue:   { icon: 'text-val-blue',   value: 'text-val-blue'   },
+  green:  { icon: 'text-val-green',  value: 'text-val-green'  },
+};
+
+const Metric: React.FC<{
+  icon: React.ReactNode;
+  label: string;
+  value?: number;
+  targetValue?: number | null;
+  warning?: boolean;
+  unit?: string;
+  color?: keyof typeof COLOR_CLASSES;
+}> = ({ icon, label, value, targetValue, warning = false, unit, color }) => {
+  const cls = color ? COLOR_CLASSES[color] : null;
+  const iconClass = warning ? (cls?.icon ?? 'text-gray-600') : 'text-white';
+  const valueClass = warning ? (cls?.value ?? 'text-stage') : 'text-white';
+
+  return (
+    <div
+      className={`flex flex-col items-center gap-0.5 rounded-xl px-2 py-2 text-center transition-colors ${
+        warning ? 'bg-orange-100' : 'bg-brand'
+      }`}
+    >
+      <span
+        className={`inline-flex items-center gap-1 text-[11px] font-medium ${iconClass}`}
+      >
+        {icon}
+        {label}
+      </span>
+      <span className={`text-[15px] font-bold leading-tight ${valueClass}`}>
+        {value != null ? value : '--'}
+        {targetValue != null ? `/${targetValue}` : null}
+        {(value != null || targetValue != null) && unit ? (
+          <span className="ml-0.5 text-[10px] font-normal opacity-70">{unit}</span>
+        ) : null}
+      </span>
+    </div>
+  );
+};

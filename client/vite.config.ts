@@ -9,6 +9,7 @@ const BACKEND = process.env.BACKEND_URL || 'http://localhost:3001';
 const proxy = {
   '/get_noi_chien': BACKEND,
   '/get_noi_chien_detail': BACKEND,
+  '/sua_noi_chien_detail': BACKEND,
   '/xoa_noi_chien_detail': BACKEND,
   '/enable_machine': BACKEND,
   '/socket.io': {
@@ -17,11 +18,13 @@ const proxy = {
   },
 };
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [react()],
+  // Vite dev stays at `/`; the Docker production build is mounted at `/react/`.
+  base: command === 'build' ? '/react/' : '/',
   build: {
     outDir: 'dist',
   },
   server: { proxy },
   preview: { proxy },
-});
+}));

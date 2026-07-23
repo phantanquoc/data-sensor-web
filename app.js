@@ -6,6 +6,7 @@ const cors = require("cors");
 app.use(cors());
 const path = require("path");
 const fs = require("fs");
+const { formatVietnamTimestamp } = require("./utils/time");
 require("dotenv").config();
 
 const DEBUG = process.env.DEBUG === "true" || process.env.DEBUG === "1";
@@ -14,7 +15,11 @@ function dbg(...args) { if (DEBUG) console.log(...args); }
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// --- REST routes FIRST (so SPA fallback never shadows them) ---
+// Legacy EJS dashboard remains the primary UI at `/`.
+app.use(express.static(path.join(__dirname, "pubic")));
+app.set("view engine", "ejs");
+app.set("views", path.join(__dirname, "views"));
+
 app.post("/enable_machine", (req, res, next) => {
   console.log(req.body);
   res.json({
@@ -25,15 +30,12 @@ app.post("/enable_machine", (req, res, next) => {
 const home = require("./router/home");
 app.use(home);
 
-// --- Serve React SPA build ---
+// React is a separate UI mounted under `/react/`; it must not shadow EJS `/`.
 const SPA_DIR = path.join(__dirname, "client", "dist");
-app.use(express.static(SPA_DIR));
+app.use("/react", express.static(SPA_DIR));
 
-// SPA fallback: any GET not matched by a REST route or a static asset above
-// returns index.html. Registered last so it never shadows the API routes.
-// (Express 5 / path-to-regexp no longer accepts a bare "*" path, so use a
-//  path-less middleware and gate on the GET method instead.)
-app.use((req, res, next) => {
+// React client-side route fallback, scoped strictly to `/react`.
+app.use("/react", (req, res, next) => {
   if (req.method !== "GET") return next();
   const indexPath = path.join(SPA_DIR, "index.html");
   if (!fs.existsSync(indexPath)) {
@@ -151,10 +153,17 @@ const { Buffer } = require("buffer");
 
 // Dọn mẻ mồ côi (mẻ chưa stop) khi khởi động lại hệ thống
 async function cleanupOrphanBatches() {
+  const cleanupAt = new Date();
   for (let n = 1; n <= 8; n++) {
     await plcModels[n].updateMany(
       { thoi_gian_stop: "" },
-      { $set: { thoi_gian_stop: new Date().toLocaleString("vi-VN"), dong_ep_khoi_dong: true } },
+      {
+        $set: {
+          thoi_gian_stop: formatVietnamTimestamp(cleanupAt),
+          thoi_gian_stop_at: cleanupAt,
+          dong_ep_khoi_dong: true,
+        },
+      },
     ).catch((err) => console.log(err));
   }
   console.log("Đã dọn mẻ mồ côi");
@@ -188,6 +197,9 @@ const REGISTER_LIST_TEMPLATE = [
 
   // khởi động
   { name: "M120", modbusAddr: 120 + 15000, val: 0, dataType: "coil" },
+
+  // đèn báo nhúng lòng — bắt sườn lên đầu tiên trong mẻ để chụp thông số nhúng lòng đầu
+  { name: "M6", modbusAddr: 6 + 15000, val: 0, dataType: "coil" },
 
   //gia đoạn 1
   { name: "M70", modbusAddr: 70 + 15000, val: 0, dataType: "coil" }, // đèn báo
@@ -244,7 +256,7 @@ for (let n = 1; n <= 8; n++) {
       D81: null, D82: null, D134: null, D135: null,
       D575: null, D576: null, D571: null, D572: null,
       D84: null, D85: null, D86: null, D87: null,
-      M120: null, M70: null,
+      M120: null, M6: null, M70: null,
       D260: null, D258: null, D256: null, D316: null, D500: null, D507: null,
       M124: null,
       D202: null, D262: null, D204: null, D264: null, D502: null, D508: null,
@@ -282,7 +294,7 @@ const CONFIG_REFRESH_MS = 60000;
 // REALTIME: 10 cảm biến + tổng thời gian + trạng thái giai đoạn → đọc MỖI cycle.
 //   holding [2,4]=D2..D5, [60,1]=D60(tổng t/g), [81,7]=D81..D87,
 //           [134,2]=D134/135, [572,6]=D571..D576(dòng điện)
-//   coil    [15070,86]=M70,M120,M124,M126,M127,M155
+//   coil    [15006,1]=M6(nhúng lòng), [15070,86]=M70,M120,M124,M126,M127,M155
 const REALTIME_HOLDING_BLOCKS = [
   [2, 4],
   [60, 1],
@@ -291,6 +303,7 @@ const REALTIME_HOLDING_BLOCKS = [
   [572, 6],
 ];
 const REALTIME_COIL_BLOCKS = [
+  [15006, 1],   // M6 — đèn báo nhúng lòng (nằm ngoài block [15070,86])
   [15070, 86],
 ];
 

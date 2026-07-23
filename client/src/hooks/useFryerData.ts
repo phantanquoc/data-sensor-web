@@ -57,6 +57,17 @@ function seedStartMsFromDoc(doc: BatchDocument | null, gNum: number): number | n
   return Date.now() - elapsedAtSeed;
 }
 
+function elapsedMsFromDoc(doc: BatchDocument, gNum: number): number | null {
+  const gdKey = `giai_doan_${gNum}` as keyof BatchDocument;
+  const gd = doc[gdKey] as { bien_du_lieu?: Array<{ thoi_gian?: string }> } | undefined;
+  if (!gd || !Array.isArray(gd.bien_du_lieu) || gd.bien_du_lieu.length < 2) return null;
+
+  const first = parseTs(gd.bien_du_lieu[1].thoi_gian);
+  const last = parseTs(gd.bien_du_lieu[gd.bien_du_lieu.length - 1].thoi_gian);
+  if (!first || !last) return null;
+  return Math.max(0, last.getTime() - first.getTime());
+}
+
 export interface DonutState {
   stage: number | null;
   elapsedMs: number;
@@ -78,18 +89,27 @@ export function useFryerData() {
   const [batchList, setBatchList] = useState<BatchListItem[]>([]);
   const [batchDetail, setBatchDetail] = useState<BatchDocument | null>(null);
   const [donut, setDonut] = useState<DonutState>(DONUT_ZERO);
+  const [stageElapsedMsByStage, setStageElapsedMsByStage] = useState<Record<number, number>>({});
 
   const currentRunningDocRef = useRef<BatchDocument | null>(null);
   const donutRef = useRef<DonutState>(DONUT_ZERO);
+  const stageElapsedMsRef = useRef<Record<number, number>>({});
   // Fallback-only anchor: the seeded stage start used when the server does not
   // provide stage_elapsed_ms. Elapsed is recomputed from it on every tick so the
   // donut keeps counting forward (not frozen at the rising-edge value).
   const fallbackStartMsRef = useRef<number | null>(null);
 
+  const rememberStageElapsed = useCallback((stageNum: number, elapsedMs: number) => {
+    stageElapsedMsRef.current[stageNum] = elapsedMs;
+    setStageElapsedMsByStage({ ...stageElapsedMsRef.current });
+  }, []);
+
   const resetView = useCallback(() => {
     setStages(makeResetStages());
     donutRef.current = DONUT_ZERO;
     setDonut(DONUT_ZERO);
+    stageElapsedMsRef.current = {};
+    setStageElapsedMsByStage({});
     currentRunningDocRef.current = null;
     fallbackStartMsRef.current = null;
   }, []);
@@ -116,6 +136,7 @@ export function useFryerData() {
 
       if (typeof stageElapsedMs === 'number') {
         // Server-authoritative: use server-provided elapsed
+        rememberStageElapsed(stageNum, stageElapsedMs);
         const newDonut: DonutState = { stage: stageNum, elapsedMs: stageElapsedMs, receivedAt: Date.now(), targetMin };
         donutRef.current = newDonut;
         setDonut(newDonut);
@@ -130,6 +151,7 @@ export function useFryerData() {
         }
         const startMs = fallbackStartMsRef.current ?? Date.now();
         const elapsed = Math.max(0, Date.now() - startMs);
+        rememberStageElapsed(stageNum, elapsed);
         const newDonut: DonutState = { stage: stageNum, elapsedMs: elapsed, receivedAt: Date.now(), targetMin };
         donutRef.current = newDonut;
         setDonut(newDonut);
@@ -141,7 +163,7 @@ export function useFryerData() {
         fallbackStartMsRef.current = null;
       }
     }
-  }, []);
+  }, [rememberStageElapsed]);
 
   /** Handle full data event (array of 4 stages + optional server elapsed) */
   const handleDataEvent = useCallback((stagesArray: StagePayload[], stageElapsedMs?: number | null) => {
@@ -162,15 +184,15 @@ export function useFryerData() {
         return;
       }
 
-      // Pick newest running (reverse scan for empty thoi_gian_stop) else newest
+      // API returns newest-first: forward scan for the first running batch, else newest (index 0)
       let running: BatchListItem | null = null;
-      for (let i = documents.length - 1; i >= 0; i--) {
+      for (let i = 0; i < documents.length; i++) {
         if (documents[i].thoi_gian_stop === '' || documents[i].thoi_gian_stop == null) {
           running = documents[i];
           break;
         }
       }
-      const chosen = running || documents[documents.length - 1];
+      const chosen = running || documents[0];
 
       const fullDoc = await getNoiChienDetail(chosen._id, n);
       // Retain running doc for backward-compat donut seeding only when batch is running
@@ -199,6 +221,8 @@ export function useFryerData() {
             vi_tri_muc_dau: gd.vi_tri_dung,
           },
         });
+        const elapsedMs = elapsedMsFromDoc(fullDoc, g);
+        if (elapsedMs != null) rememberStageElapsed(g, elapsedMs);
       }
 
       const gd4 = fullDoc.giai_doan_4 || { bien_du_lieu: [] };
@@ -211,11 +235,13 @@ export function useFryerData() {
           thoi_gian_treo_long: gd4.thoi_gian_treo_long ?? gd4.thoi_gian_treo_long_gd_4 ?? 0,
         },
       });
+      const elapsedMs = elapsedMsFromDoc(fullDoc, 4);
+      if (elapsedMs != null) rememberStageElapsed(4, elapsedMs);
     } catch (err) {
       console.log('auto_load_noi_chien error:', err);
       resetView();
     }
-  }, [processStage, resetView]);
+  }, [processStage, resetView, rememberStageElapsed]);
 
   return {
     stages,
@@ -224,6 +250,7 @@ export function useFryerData() {
     batchDetail,
     setBatchDetail,
     donut,
+    stageElapsedMsByStage,
     resetView,
     handleDataEvent,
     autoLoad,

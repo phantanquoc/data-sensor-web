@@ -74,7 +74,7 @@ The active stage SHALL display a hand-drawn SVG donut progress timer (radius 27,
 
 ### Requirement: Auto-load current fryer state on tab open
 
-When a fryer tab becomes active, the dashboard SHALL fetch that fryer's batch list, select the most recent running batch (the newest batch with an empty `thoi_gian_stop`; if none is running, the newest batch), fetch that batch's full document, and rebuild the four stage views from it with `active: false`, showing the last recorded `bien_du_lieu` values for each stage — without waiting for the next socket tick. The selected running document SHALL be retained so the donut can seed its elapsed time on the first subsequent live tick.
+When a fryer tab becomes active, the dashboard SHALL fetch that fryer's batch list (returned newest-first by the API), forward-scan for the first batch with an empty `thoi_gian_stop` (i.e. the newest running batch); if none is running, fall back to the newest batch (`documents[0]`). It SHALL then fetch that batch's full document and rebuild the four stage views from it with `active: false`, showing the last recorded `bien_du_lieu` values for each stage — without waiting for the next socket tick. The selected running document SHALL be retained so the donut can seed its elapsed time on the first subsequent live tick.
 
 #### Scenario: Running batch exists
 - **WHEN** a fryer tab opens and that fryer has a batch with empty `thoi_gian_stop`
