@@ -478,6 +478,42 @@ const plcSchema = new Schema({
     // D87
     nhiet_do_ra_bom_vong_nuoc: { type: Number, default: 0 },
   },
+  // HIỆU SUẤT MÁY: ảnh chụp full sensor tại 2 mốc sự kiện đầu tiên trong mẻ.
+  //   kick_root  = tại M1 (bắt đầu kick root) lên true lần đầu
+  //   nhung_hang = tại M155 (bắt đầu nhúng hàng / vào GĐ1) lên true lần đầu
+  // Mỗi snapshot ghi đúng 1 lần/mẻ. giay_tu_start = số giây từ M120 start đến mốc đó.
+  hieu_suat_may: {
+    kick_root: {
+      thoi_gian: { type: String, default: "" },
+      thoi_gian_at: { type: Date, default: null },
+      giay_tu_start: { type: Number, default: null },
+      ap_suat_vo_hoi: { type: Number, default: 0 },
+      ap_suat_chan_khong: { type: Number, default: 0 },
+      ap_suat_vong_nuoc: { type: Number, default: 0 },
+      nhiet_do: { type: Number, default: 0 },
+      dong_dien_dong_co_root: { type: Number, default: 0 },
+      dong_dien_dong_co_vong_nuoc: { type: Number, default: 0 },
+      nhiet_do_vao_binh_sinh_han: { type: Number, default: 0 },
+      nhiet_do_ra_binh_sinh_han: { type: Number, default: 0 },
+      nhiet_do_vao_bom_vong_nuoc: { type: Number, default: 0 },
+      nhiet_do_ra_bom_vong_nuoc: { type: Number, default: 0 },
+    },
+    nhung_hang: {
+      thoi_gian: { type: String, default: "" },
+      thoi_gian_at: { type: Date, default: null },
+      giay_tu_start: { type: Number, default: null },
+      ap_suat_vo_hoi: { type: Number, default: 0 },
+      ap_suat_chan_khong: { type: Number, default: 0 },
+      ap_suat_vong_nuoc: { type: Number, default: 0 },
+      nhiet_do: { type: Number, default: 0 },
+      dong_dien_dong_co_root: { type: Number, default: 0 },
+      dong_dien_dong_co_vong_nuoc: { type: Number, default: 0 },
+      nhiet_do_vao_binh_sinh_han: { type: Number, default: 0 },
+      nhiet_do_ra_binh_sinh_han: { type: Number, default: 0 },
+      nhiet_do_vao_bom_vong_nuoc: { type: Number, default: 0 },
+      nhiet_do_ra_bom_vong_nuoc: { type: Number, default: 0 },
+    },
+  },
 });
 
 // Index for fast lookup of open batches (thoi_gian_stop: "")

@@ -2,7 +2,7 @@ import React from 'react';
 import { Activity, CalendarDays, Clock3, Gauge, Thermometer, Zap } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import styles from './BatchDetail.module.css';
-import type { BatchDocument, BienDuLieuEntry } from '../types';
+import type { BatchDocument, BienDuLieuEntry, HieuSuatMaySnapshot, SensorData } from '../types';
 import { parseTs } from '../hooks/timeUtils';
 
 interface BatchDetailProps {
@@ -95,6 +95,15 @@ function getStats(entries: BienDuLieuEntry[], key: MetricKey) {
   };
 }
 
+function formatSeconds(total: number | null | undefined): string {
+  if (total == null || !Number.isFinite(total)) return '—';
+  const s = Math.max(0, Math.round(total));
+  if (s < 60) return `${s} giây`;
+  const minutes = Math.floor(s / 60);
+  const seconds = s % 60;
+  return seconds ? `${minutes} phút ${seconds} giây` : `${minutes} phút`;
+}
+
 function formatDuration(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return 'Chưa có dữ liệu';
   const totalSeconds = Math.floor(ms / 1000);
@@ -118,11 +127,18 @@ function getConfiguredMinutes(stage: Record<string, unknown>): number | null {
 
 export const BatchDetail: React.FC<BatchDetailProps> = ({ data }) => {
   const stages = [data.giai_doan_1, data.giai_doan_2, data.giai_doan_3, data.giai_doan_4];
-  const nhungLong = data.nhung_long_dau;
 
-  function snapshotValue(key: MetricKey): number | null {
-    if (!nhungLong) return null;
-    const raw = Number((nhungLong as unknown as Record<string, unknown>)[key]);
+  // Hiệu suất máy: 2 mốc chụp (M1 kick root, M155 nhúng hàng). Hiển thị nếu có ít nhất 1 mốc.
+  const hieuSuat = data.hieu_suat_may;
+  const perfRows: Array<{ label: string; snap: HieuSuatMaySnapshot | null | undefined }> = [
+    { label: 'Bắt đầu kick root (M1)', snap: hieuSuat?.kick_root },
+    { label: 'Bắt đầu nhúng hàng (M155)', snap: hieuSuat?.nhung_hang },
+  ];
+  const hasPerf = perfRows.some((row) => !!row.snap);
+
+  function perfNumber(snap: HieuSuatMaySnapshot | null | undefined, key: keyof SensorData): number | null {
+    if (!snap) return null;
+    const raw = Number(snap[key]);
     return Number.isFinite(raw) ? raw : null;
   }
 
@@ -140,6 +156,33 @@ export const BatchDetail: React.FC<BatchDetailProps> = ({ data }) => {
           <strong><Clock3 size={17} /> {formatValue(Number(data.tong_thoi_gian_chay) || 0)} phút</strong>
         </div>
       </div>
+
+      {hasPerf && (
+        <section className={styles.perfSection} aria-label="Hiệu suất máy">
+          <h3 className={styles.perfTitle}><Gauge size={17} strokeWidth={2.2} /> Hiệu suất máy</h3>
+          <div className={styles.perfTable}>
+            <div className={styles.perfHeader}>
+              <span>Thông số</span>
+              <span>Thời gian</span>
+              <span>Nhiệt độ</span>
+              <span>Áp suất</span>
+              <span>Dòng điện</span>
+            </div>
+            {perfRows.map((row) => {
+              const giay = row.snap?.giay_tu_start;
+              return (
+                <div className={styles.perfRow} key={row.label}>
+                  <span>{row.label}</span>
+                  <b>{formatSeconds(giay)}</b>
+                  <b>{formatValue(perfNumber(row.snap, 'nhiet_do'))}</b>
+                  <b>{formatValue(perfNumber(row.snap, 'ap_suat_chan_khong'))}</b>
+                  <b>{formatValue(perfNumber(row.snap, 'dong_dien_dong_co_root'))}</b>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       <div className={styles.stageGrid}>
         {stages.map((stage, index) => {
@@ -160,25 +203,19 @@ export const BatchDetail: React.FC<BatchDetailProps> = ({ data }) => {
 
               {metricGroups.map((group) => {
                 const Icon = group.icon;
-                // Chỉ giai đoạn 1 (index 0) mới có cột "Bắt đầu nhúng" (ảnh chụp M6 nhúng lòng đầu)
-                const showNhung = index === 0 && !!nhungLong;
-                const rowClass = showNhung ? `${styles.metricRow} ${styles.withNhung}` : styles.metricRow;
-                const headerClass = showNhung ? `${styles.metricRowHeader} ${styles.withNhung}` : styles.metricRowHeader;
                 return (
                   <section className={`${styles.metricGroup} ${styles[group.tone]}`} key={group.title}>
                     <h3><Icon size={17} strokeWidth={2.2} /> {group.title}</h3>
                     <div className={styles.metricTable}>
-                      <div className={headerClass}>
+                      <div className={styles.metricRowHeader}>
                         <span>Thông số</span>
-                        {showNhung && <span>Bắt đầu nhúng</span>}
                         <span>Bắt đầu</span><span>Thấp nhất</span><span>Cao nhất</span><span>Trung bình</span>
                       </div>
                       {group.metrics.map((metric) => {
                         const stats = getStats(samples, metric.key);
                         return (
-                          <div className={rowClass} key={metric.key}>
+                          <div className={styles.metricRow} key={metric.key}>
                             <span>{metric.label}</span>
-                            {showNhung && <b>{formatValue(snapshotValue(metric.key))}</b>}
                             <b>{formatValue(stats.start)}</b>
                             <b>{formatValue(stats.min)}</b>
                             <b>{formatValue(stats.max)}</b>

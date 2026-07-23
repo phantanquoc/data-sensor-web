@@ -3,7 +3,8 @@ const express = require("express");
 const router = express.Router();
 
 const homeController = require("../controller/home");
-router.get("/", homeController.home);
+// EJS dashboard cũ giữ làm dự phòng ở `/legacy` (React là UI chính ở `/`).
+router.get("/legacy", homeController.home);
 router.get("/get_noi_chien", homeController.noi_chien);
 router.get("/get_noi_chien_detail", homeController.get_noi_chien_detail);
 router.patch("/sua_noi_chien_detail", homeController.sua_noi_chien_detail);

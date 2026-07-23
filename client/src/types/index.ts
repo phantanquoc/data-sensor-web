@@ -113,6 +113,22 @@ export interface BatchStage4 {
   [key: string]: unknown;
 }
 
+/** Một ảnh chụp hiệu suất máy tại 1 mốc sự kiện (M1 hoặc M155) — full sensor + số giây từ M120 start */
+export interface HieuSuatMaySnapshot extends SensorData {
+  thoi_gian: string;
+  thoi_gian_at?: string | null;
+  /** Số giây từ lúc M120 start đến khi mốc này on lần đầu trong mẻ */
+  giay_tu_start?: number | null;
+}
+
+/** Hiệu suất máy: 2 mốc chụp đầu tiên trong mẻ */
+export interface HieuSuatMay {
+  /** Ảnh chụp tại M1 (bắt đầu kick root) lên true lần đầu */
+  kick_root?: HieuSuatMaySnapshot | null;
+  /** Ảnh chụp tại M155 (bắt đầu nhúng hàng / vào GĐ1) lên true lần đầu */
+  nhung_hang?: HieuSuatMaySnapshot | null;
+}
+
 /** Full batch document from GET /get_noi_chien_detail */
 export interface BatchDocument {
   _id: string;
@@ -121,6 +137,7 @@ export interface BatchDocument {
   thoi_gian_start: string;
   thoi_gian_stop: string;
   tong_thoi_gian_chay: number;
+  hieu_suat_may?: HieuSuatMay | null;
   giai_doan_1: BatchStage123;
   giai_doan_2: BatchStage123;
   giai_doan_3: BatchStage123;

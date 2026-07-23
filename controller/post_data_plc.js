@@ -34,6 +34,14 @@ const batchStartMs = {};
 const m155Prev = {};
 const giayVaoGd1 = {};
 
+// --- HIỆU SUẤT MÁY: ảnh chụp full sensor tại sườn lên đầu tiên trong mẻ, per-fryer. ---
+// m1Prev[n]: trạng thái M1 (bắt đầu kick root) chu kỳ trước (bắt sườn lên).
+// hieuSuatKickRoot[n]: snapshot tại M1 on lần đầu (null = chưa chụp). Reset ở đầu mẻ.
+// hieuSuatNhungHang[n]: snapshot tại M155 on lần đầu (null = chưa chụp). Reset ở đầu mẻ.
+const m1Prev = {};
+const hieuSuatKickRoot = {};
+const hieuSuatNhungHang = {};
+
 function temporaryBatchCode(n, startedAt, id) {
   const datePart = formatVietnamDateCode(startedAt);
   return `NC${n}-${datePart}-${String(id).slice(-6).toUpperCase()}`;
@@ -105,6 +113,32 @@ exports.postDataPlc = async (
   buf_571_572.writeUInt16LE(d571, 0);
   buf_571_572.writeUInt16LE(d572, 2);
   let d_571_572 = parseFloat(buf_571_572.readFloatLE(0).toFixed(2));
+
+  // --- HIỆU SUẤT MÁY: đọc thẳng từ PLC (thay cho giá trị tính ở server) ---
+  // Áp suất bắt đầu kick root: D216 (float LE = D216 low + D217 high)
+  let d216 = values && values["D216"] !== undefined ? values["D216"] : 0;
+  let d217 = values && values["D217"] !== undefined ? values["D217"] : 0;
+  const buf_216_217 = Buffer.alloc(4);
+  buf_216_217.writeUInt16LE(d216 || 0, 0);
+  buf_216_217.writeUInt16LE(d217 || 0, 2);
+  let d_216_217 = parseFloat(buf_216_217.readFloatLE(0).toFixed(2));
+
+  // Áp suất khi bắt đầu nhúng lồng: D672 (float LE = D672 low + D673 high)
+  let d672 = values && values["D672"] !== undefined ? values["D672"] : 0;
+  let d673 = values && values["D673"] !== undefined ? values["D673"] : 0;
+  const buf_672_673 = Buffer.alloc(4);
+  buf_672_673.writeUInt16LE(d672 || 0, 0);
+  buf_672_673.writeUInt16LE(d673 || 0, 2);
+  let d_672_673 = parseFloat(buf_672_673.readFloatLE(0).toFixed(2));
+
+  // Thời gian bắt đầu → kick root (M120→M1): D668 phút + D666 giây → tổng giây
+  let d666 = values && values["D666"] !== undefined ? Number(values["D666"]) || 0 : 0; // giây
+  let d668 = values && values["D668"] !== undefined ? Number(values["D668"]) || 0 : 0; // phút
+  const giay_m120_m1 = d668 * 60 + d666;
+  // Thời gian kick root → hạ lồng (M1→M155): D676 phút + D674 giây → tổng giây
+  let d674 = values && values["D674"] !== undefined ? Number(values["D674"]) || 0 : 0; // giây
+  let d676 = values && values["D676"] !== undefined ? Number(values["D676"]) || 0 : 0; // phút
+  const giay_m1_m155 = d676 * 60 + d674;
 
   // D84..D87 divided by 10
   let d84 = values && values["D84"] !== undefined ? values["D84"] : 0;
@@ -386,10 +420,61 @@ exports.postDataPlc = async (
     }
   }
 
-  // --- M155 (vào Giai đoạn 1) rising edge → ghi số giây từ M120 start → vào GĐ1 (1 lần/mẻ) ---
+  // Helper: ảnh chụp hiệu suất máy tại 1 mốc sự kiện (full sensor + số giây từ M120 start).
+  const buildPerfSnapshot = (capturedAt) => ({
+    thoi_gian: formatVietnamTimestamp(capturedAt),
+    thoi_gian_at: capturedAt,
+    giay_tu_start:
+      batchStartMs[n] != null
+        ? Math.max(0, Math.round((capturedAt.getTime() - batchStartMs[n]) / 1000))
+        : null,
+    ap_suat_vo_hoi: d_2_3,
+    ap_suat_chan_khong: d_4_5,
+    ap_suat_vong_nuoc: d_81_82,
+    nhiet_do: d_134_135,
+    dong_dien_dong_co_root: d_575_576,
+    dong_dien_dong_co_vong_nuoc: d_571_572,
+    nhiet_do_vao_binh_sinh_han: d84 / 10,
+    nhiet_do_ra_binh_sinh_han: d85 / 10,
+    nhiet_do_vao_bom_vong_nuoc: d86 / 10,
+    nhiet_do_ra_bom_vong_nuoc: d87 / 10,
+  });
+
+  // --- M1 (bắt đầu kick root) rising edge → chụp hiệu suất máy (1 lần/mẻ) ---
+  const m1Now = values && values["M1"] === true;
+  if (Start > 1 && m1Now && !m1Prev[n] && !hieuSuatKickRoot[n] && id_document[n]) {
+    // Thời gian + áp suất đọc thẳng từ PLC (D668/D666 phút·giây, D216 float).
+    // Nhiệt độ + dòng điện giữ ảnh chụp cảm biến tại sườn lên (PLC không có thanh ghi riêng).
+    const snap = {
+      ...buildPerfSnapshot(new Date()),
+      giay_tu_start: giay_m120_m1,     // D668 phút + D666 giây (thay giá trị tính ở server)
+      ap_suat_chan_khong: d_216_217,   // D216 — áp suất bắt đầu kick root
+    };
+    hieuSuatKickRoot[n] = snap;
+    model
+      .updateOne({ _id: id_document[n] }, { $set: { "hieu_suat_may.kick_root": snap } })
+      .catch((err) => console.log(err));
+    dbg("nồi chiên " + n + " chụp hiệu suất kick root (M1)");
+  }
+  m1Prev[n] = m1Now;
+
+  // --- M155 (vào Giai đoạn 1) rising edge → ghi số giây từ M120 start → vào GĐ1 + chụp hiệu suất (1 lần/mẻ) ---
   const m155Now = giai_doan_1 === true;
   if (Start > 1 && m155Now && !m155Prev[n] && giayVaoGd1[n] == null && batchStartMs[n] != null) {
     giayVaoGd1[n] = Math.max(0, Math.round((Date.now() - batchStartMs[n]) / 1000));
+  }
+  if (Start > 1 && m155Now && !m155Prev[n] && !hieuSuatNhungHang[n] && id_document[n]) {
+    // Thời gian = M1→M155 (D676 phút + D674 giây), áp suất = D672 float. Đọc thẳng từ PLC.
+    const snap = {
+      ...buildPerfSnapshot(new Date()),
+      giay_tu_start: giay_m1_m155,     // D676 phút + D674 giây (kick root → hạ lồng)
+      ap_suat_chan_khong: d_672_673,   // D672 — áp suất khi bắt đầu nhúng lồng
+    };
+    hieuSuatNhungHang[n] = snap;
+    model
+      .updateOne({ _id: id_document[n] }, { $set: { "hieu_suat_may.nhung_hang": snap } })
+      .catch((err) => console.log(err));
+    dbg("nồi chiên " + n + " chụp hiệu suất nhúng hàng (M155)");
   }
   m155Prev[n] = m155Now;
 
@@ -520,6 +605,10 @@ exports.postDataPlc = async (
       // Reset mốc vào GĐ1 (M155) để bắt sườn lên lần đầu của mẻ mới.
       m155Prev[n] = false;
       giayVaoGd1[n] = null;
+      // Reset hiệu suất máy (M1 kick root + M155 nhúng hàng) để chụp lại ở mẻ mới.
+      m1Prev[n] = false;
+      hieuSuatKickRoot[n] = null;
+      hieuSuatNhungHang[n] = null;
       // Mốc bắt đầu mẻ để tính số giây từ M120 start → M6 on lần đầu
       batchStartMs[n] = batchStartedAt.getTime();
     }

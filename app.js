@@ -15,8 +15,13 @@ function dbg(...args) { if (DEBUG) console.log(...args); }
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Legacy EJS dashboard remains the primary UI at `/`.
-app.use(express.static(path.join(__dirname, "pubic")));
+// React SPA is the primary UI at `/`. Its static assets (hashed JS/CSS under
+// /assets, plus /js from pubic) are served first so they resolve at the root.
+const SPA_DIR = path.join(__dirname, "client", "dist");
+app.use(express.static(SPA_DIR));            // React build (index.html, /assets/*)
+app.use(express.static(path.join(__dirname, "pubic"))); // /js/socket.io.js (dùng chung EJS)
+
+// EJS engine — legacy dashboard vẫn giữ để dự phòng, đặt dưới `/legacy`.
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "views"));
 
@@ -27,15 +32,14 @@ app.post("/enable_machine", (req, res, next) => {
     data: req.body,
   });
 });
+
+// API + legacy EJS view. router/home.js phục vụ `/legacy` (EJS) và các API get/sua/xoa.
 const home = require("./router/home");
 app.use(home);
 
-// React is a separate UI mounted under `/react/`; it must not shadow EJS `/`.
-const SPA_DIR = path.join(__dirname, "client", "dist");
-app.use("/react", express.static(SPA_DIR));
-
-// React client-side route fallback, scoped strictly to `/react`.
-app.use("/react", (req, res, next) => {
+// React client-side route fallback: mọi GET không khớp static/API → trả index.html
+// để react-router xử lý (Overview `/`, FryerDetail `/may/:n`, ...).
+app.use((req, res, next) => {
   if (req.method !== "GET") return next();
   const indexPath = path.join(SPA_DIR, "index.html");
   if (!fs.existsSync(indexPath)) {
@@ -201,6 +205,9 @@ const REGISTER_LIST_TEMPLATE = [
   // đèn báo nhúng lòng — bắt sườn lên đầu tiên trong mẻ để chụp thông số nhúng lòng đầu
   { name: "M6", modbusAddr: 6 + 15000, val: 0, dataType: "coil" },
 
+  // M1 — trạng thái bắt đầu kick root: bắt sườn lên đầu tiên trong mẻ để chụp hiệu suất máy
+  { name: "M1", modbusAddr: 1 + 15000, val: 0, dataType: "coil" },
+
   //gia đoạn 1
   { name: "M70", modbusAddr: 70 + 15000, val: 0, dataType: "coil" }, // đèn báo
 
@@ -233,6 +240,21 @@ const REGISTER_LIST_TEMPLATE = [
 
   { name: "D214", modbusAddr: 214, val: 0, dataType: "reg" },
 
+  // --- HIỆU SUẤT MÁY: đọc thẳng giá trị PLC (thay vì tính ở server) ---
+  // D ≤ 400 → modbusAddr = số D; D > 400 → modbusAddr = số D + 1 (offset HMI).
+  // Áp suất bắt đầu kick root: D216 (float LE = D216 low + D217 high) → 216/217
+  { name: "D216", modbusAddr: 216, val: 0, dataType: "reg" },
+  { name: "D217", modbusAddr: 217, val: 0, dataType: "reg" },
+  // Thời gian M120→M1 (bắt đầu đến kick root): D668 phút / D666 giây → 669 / 667
+  { name: "D666", modbusAddr: 667, val: 0, dataType: "reg" }, // giây
+  { name: "D668", modbusAddr: 669, val: 0, dataType: "reg" }, // phút
+  // Thời gian M1→M155 (kick root đến hạ lồng): D676 phút / D674 giây → 677 / 675
+  { name: "D674", modbusAddr: 675, val: 0, dataType: "reg" }, // giây
+  { name: "D676", modbusAddr: 677, val: 0, dataType: "reg" }, // phút
+  // Áp suất khi bắt đầu nhúng lồng: D672 (float LE = D672 low + D673 high) → 673/674
+  { name: "D672", modbusAddr: 673, val: 0, dataType: "reg" },
+  { name: "D673", modbusAddr: 674, val: 0, dataType: "reg" },
+
   //test X0
   { name: "X0", modbusAddr: 0 + 16000, val: 0, dataType: "coil" },
   //test M155
@@ -256,13 +278,16 @@ for (let n = 1; n <= 8; n++) {
       D81: null, D82: null, D134: null, D135: null,
       D575: null, D576: null, D571: null, D572: null,
       D84: null, D85: null, D86: null, D87: null,
-      M120: null, M6: null, M70: null,
+      M120: null, M6: null, M1: null, M70: null,
       D260: null, D258: null, D256: null, D316: null, D500: null, D507: null,
       M124: null,
       D202: null, D262: null, D204: null, D264: null, D502: null, D508: null,
       M126: null,
       D206: null, D266: null, D208: null, D268: null, D504: null, D509: null,
       M127: null,
+      D216: null, D217: null,
+      D666: null, D668: null, D674: null, D676: null,
+      D672: null, D673: null,
       X0: null, M155: null, D60: null,
     },
   });
@@ -293,16 +318,21 @@ const CONFIG_REFRESH_MS = 60000;
 //
 // REALTIME: 10 cảm biến + tổng thời gian + trạng thái giai đoạn → đọc MỖI cycle.
 //   holding [2,4]=D2..D5, [60,1]=D60(tổng t/g), [81,7]=D81..D87,
-//           [134,2]=D134/135, [572,6]=D571..D576(dòng điện)
-//   coil    [15006,1]=M6(nhúng lòng), [15070,86]=M70,M120,M124,M126,M127,M155
+//           [134,2]=D134/135, [216,2]=D216/217(áp suất kick root),
+//           [572,6]=D571..D576(dòng điện),
+//           [667,11]=D666..D676(t/g M120→M1, M1→M155 + áp suất nhúng lồng D672/673)
+//   coil    [15001,1]=M1(kick root), [15006,1]=M6(nhúng lòng), [15070,86]=M70,M120,M124,M126,M127,M155
 const REALTIME_HOLDING_BLOCKS = [
   [2, 4],
   [60, 1],
   [81, 7],
   [134, 2],
+  [216, 2],    // D216/D217 — áp suất bắt đầu kick root (float)
   [572, 6],
+  [667, 11],   // D666..D676 (modbus 667..677) — thời gian M120→M1, M1→M155 + áp suất nhúng lồng (D672/D673)
 ];
 const REALTIME_COIL_BLOCKS = [
+  [15001, 1],   // M1 — trạng thái bắt đầu kick root (nằm ngoài block [15070,86])
   [15006, 1],   // M6 — đèn báo nhúng lòng (nằm ngoài block [15070,86])
   [15070, 86],
 ];

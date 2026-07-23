@@ -145,13 +145,6 @@
   padding: 8px 10px;
 }
 
-/* Giai đoạn 1: thêm cột "Bắt đầu nhúng" (ảnh chụp M6 nhúng lòng đầu) → 5 cột số */
-.metricRowHeader.withNhung,
-.metricRow.withNhung {
-  grid-template-columns: minmax(140px, 1.55fr) repeat(5, minmax(60px, .75fr));
-  min-width: 600px;
-}
-
 .metricRowHeader {
   color: #7a8796;
   border-bottom: 1px solid #e5ebf2;
@@ -173,6 +166,65 @@
   background: #e6f3ff;
   border-radius: 5px;
   font-size: 12px;
+  text-align: center;
+}
+
+/* Bảng "Hiệu suất máy" — nằm trên grid 4 giai đoạn */
+.perfSection {
+  margin-bottom: 16px;
+  border: 1px solid #e5ebf2;
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.perfTitle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  padding: 11px 14px;
+  font-size: 15px;
+  color: #0284a8;
+  background: #eefbfe;
+  border-bottom: 1px solid #e5ebf2;
+}
+
+.perfTable {
+  overflow-x: auto;
+}
+
+.perfHeader,
+.perfRow {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.6fr) repeat(4, minmax(90px, 1fr));
+  min-width: 640px;
+  align-items: center;
+  column-gap: 8px;
+  padding: 9px 14px;
+}
+
+.perfHeader {
+  color: #7a8796;
+  border-bottom: 1px solid #e5ebf2;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.perfRow {
+  color: #324152;
+  border-bottom: 1px solid #eef2f6;
+  font-size: 13px;
+}
+
+.perfRow:last-child { border-bottom: 0; }
+
+.perfRow b {
+  padding: 5px 6px;
+  color: #0284a8;
+  background: #eefbfe;
+  border-radius: 5px;
+  font-size: 13px;
   text-align: center;
 }
 

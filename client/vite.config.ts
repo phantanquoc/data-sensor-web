@@ -18,10 +18,10 @@ const proxy = {
   },
 };
 
-export default defineConfig(({ command }) => ({
+export default defineConfig(() => ({
   plugins: [react()],
-  // Vite dev stays at `/`; the Docker production build is mounted at `/react/`.
-  base: command === 'build' ? '/react/' : '/',
+  // React is the primary UI, mounted at `/` in both dev and the Docker production build.
+  base: '/',
   build: {
     outDir: 'dist',
   },
