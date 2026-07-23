@@ -7,7 +7,7 @@ import { FleetLineChart } from '../components/FleetLineChart';
 
 export const Overview: React.FC = () => {
   const statuses = useAllFryers();
-  const { tempSeries, apSeries } = useFleetHistory();
+  const { latest, previous } = useFleetHistory();
   const runningCount = statuses.filter((s) => s.running).length;
 
   return (
@@ -47,12 +47,14 @@ export const Overview: React.FC = () => {
           <FleetLineChart
             title="Nhiệt độ"
             unit="°C"
-            series={tempSeries}
+            latestSeries={latest.tempSeries}
+            previousSeries={previous.tempSeries}
           />
           <FleetLineChart
             title="Áp chân không"
             unit="bar"
-            series={apSeries}
+            latestSeries={latest.apSeries}
+            previousSeries={previous.apSeries}
           />
         </div>
       </section>

@@ -1,8 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React from 'react';
 import { Link } from 'react-router-dom';
 import { Flame, Power, Thermometer, Gauge, Zap, ChevronRight } from 'lucide-react';
 import type { FryerStatus } from '../hooks/useAllFryers';
 import { isTemperatureWarning } from '../constants';
+import { useLiveElapsed } from '../hooks/useLiveElapsed';
 
 const STAGE_LABEL: Record<number, string> = {
   1: 'Giai đoạn 1',
@@ -15,49 +16,11 @@ interface MachineCardProps {
   status: FryerStatus;
 }
 
-const TIMER_STEP_MS = 2000;
-
-function quantizeElapsed(elapsedMs: number): number {
-  return Math.floor(Math.max(0, elapsedMs) / TIMER_STEP_MS) * TIMER_STEP_MS;
-}
-
 function formatElapsedClock(elapsedMs: number): string {
   const totalSeconds = Math.floor(Math.max(0, elapsedMs) / 1000);
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
-}
-
-function useSteppedElapsed(running: boolean, stage: number | null, serverElapsedMs: number): number {
-  const anchorRef = useRef({ stage, elapsedMs: serverElapsedMs, receivedAt: Date.now() });
-  const [displayElapsedMs, setDisplayElapsedMs] = useState(() => quantizeElapsed(serverElapsedMs));
-
-  useEffect(() => {
-    const previousStage = anchorRef.current.stage;
-    anchorRef.current = { stage, elapsedMs: serverElapsedMs, receivedAt: Date.now() };
-
-    if (!running) {
-      setDisplayElapsedMs(0);
-    } else if (previousStage !== stage) {
-      setDisplayElapsedMs(quantizeElapsed(serverElapsedMs));
-    }
-  }, [running, stage, serverElapsedMs]);
-
-  useEffect(() => {
-    if (!running) return undefined;
-
-    const tick = () => {
-      const anchor = anchorRef.current;
-      const projected = anchor.elapsedMs + (Date.now() - anchor.receivedAt);
-      setDisplayElapsedMs(quantizeElapsed(projected));
-    };
-
-    tick();
-    const timer = window.setInterval(tick, TIMER_STEP_MS);
-    return () => window.clearInterval(timer);
-  }, [running, stage]);
-
-  return displayElapsedMs;
 }
 
 export const MachineCard: React.FC<MachineCardProps> = ({ status }) => {
@@ -67,13 +30,16 @@ export const MachineCard: React.FC<MachineCardProps> = ({ status }) => {
     running,
     stage,
     elapsedMs,
+    receivedAt,
     targetMin,
     targetTemperature,
     tongThoiGian,
     sensor,
   } = status;
 
-  const displayElapsedMs = useSteppedElapsed(running, stage, elapsedMs);
+  // Same shared timer as the detail page — server-authoritative elapsed +
+  // capped interpolation + 1 s tick, so both views agree to the second.
+  const displayElapsedMs = useLiveElapsed(elapsedMs, receivedAt, running);
   const elapsedMin = displayElapsedMs / 60000;
   const isOvertime = targetMin > 0 && elapsedMin > targetMin;
   const pct = targetMin > 0 ? Math.min((elapsedMin / targetMin) * 100, 100) : 0;

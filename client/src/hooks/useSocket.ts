@@ -4,7 +4,7 @@ import type { StagePayload, NoiChienDataPayload } from '../types';
 
 interface UseSocketOptions {
   soNoiChien: string;
-  onData: (stages: StagePayload[], stageElapsedMs?: number | null) => void;
+  onData: (stages: StagePayload[], stageElapsedMs?: number | null, elapsedAgeMs?: number) => void;
   onStop: () => void;
 }
 
@@ -40,9 +40,9 @@ export function useSocket({ soNoiChien, onData, onStop }: UseSocketOptions) {
     const dataHandler = (payload: StagePayload[] | NoiChienDataPayload) => {
       // Backward-compat: old server sends raw array, new server sends wrapper object
       if (Array.isArray(payload)) {
-        onData(payload, undefined);
+        onData(payload, undefined, undefined);
       } else {
-        onData(payload.stages, payload.stage_elapsed_ms);
+        onData(payload.stages, payload.stage_elapsed_ms, payload.elapsed_age_ms);
       }
     };
     const stopHandler = () => {

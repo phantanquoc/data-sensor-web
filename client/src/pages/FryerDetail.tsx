@@ -45,8 +45,8 @@ export const FryerDetail: React.FC = () => {
     autoLoad,
   } = useFryerData();
 
-  const onData = useCallback((stagesArr: StagePayload[], stageElapsedMs?: number | null) => {
-    handleDataEvent(stagesArr, stageElapsedMs);
+  const onData = useCallback((stagesArr: StagePayload[], stageElapsedMs?: number | null, elapsedAgeMs?: number) => {
+    handleDataEvent(stagesArr, stageElapsedMs, elapsedAgeMs);
   }, [handleDataEvent]);
 
   const onStop = useCallback(() => {

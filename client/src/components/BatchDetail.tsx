@@ -66,11 +66,7 @@ const metricGroups: Array<{
 ];
 
 function parseEntryTime(value: string | undefined): Date | null {
-  const legacy = parseTs(value);
-  if (legacy) return legacy;
-  if (!value) return null;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  return parseTs(value);
 }
 
 function validSamples(entries: BienDuLieuEntry[] | undefined): BienDuLieuEntry[] {

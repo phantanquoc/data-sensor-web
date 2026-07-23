@@ -115,7 +115,7 @@ export function useFryerData() {
   }, []);
 
   /** Process a single stage payload (updates stages state + donut for backward-compat fallback) */
-  const processStage = useCallback((stagePayload: StagePayload, stageElapsedMs?: number | null) => {
+  const processStage = useCallback((stagePayload: StagePayload, stageElapsedMs?: number | null, elapsedAgeMs?: number) => {
     const stageNum = parseInt(stagePayload.giai_doan.replace('Giai đoạn: ', ''), 10);
     if (isNaN(stageNum) || stageNum < 1 || stageNum > 4) return;
 
@@ -135,9 +135,12 @@ export function useFryerData() {
       }
 
       if (typeof stageElapsedMs === 'number') {
-        // Server-authoritative: use server-provided elapsed
+        // Server-authoritative: use server-provided elapsed. Anchor receivedAt
+        // back by the payload's age so a cached join-snapshot lines up with live
+        // listeners instead of lagging one emit-gap behind.
+        const receivedAt = Date.now() - Math.max(0, elapsedAgeMs ?? 0);
         rememberStageElapsed(stageNum, stageElapsedMs);
-        const newDonut: DonutState = { stage: stageNum, elapsedMs: stageElapsedMs, receivedAt: Date.now(), targetMin };
+        const newDonut: DonutState = { stage: stageNum, elapsedMs: stageElapsedMs, receivedAt, targetMin };
         donutRef.current = newDonut;
         setDonut(newDonut);
       } else {
@@ -166,9 +169,9 @@ export function useFryerData() {
   }, [rememberStageElapsed]);
 
   /** Handle full data event (array of 4 stages + optional server elapsed) */
-  const handleDataEvent = useCallback((stagesArray: StagePayload[], stageElapsedMs?: number | null) => {
+  const handleDataEvent = useCallback((stagesArray: StagePayload[], stageElapsedMs?: number | null, elapsedAgeMs?: number) => {
     for (const s of stagesArray) {
-      processStage(s, stageElapsedMs);
+      processStage(s, stageElapsedMs, elapsedAgeMs);
     }
   }, [processStage]);
 

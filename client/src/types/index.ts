@@ -55,6 +55,12 @@ export interface StagePayload {
 export interface NoiChienDataPayload {
   stages: StagePayload[];
   stage_elapsed_ms?: number | null;
+  /**
+   * Age of stage_elapsed_ms in ms at send time: 0 for a live emit, >0 for a
+   * cached join-snapshot. The client anchors receivedAt = now - elapsed_age_ms
+   * so a late-joining page matches live listeners instead of lagging a gap.
+   */
+  elapsed_age_ms?: number;
 }
 
 /** Batch list item (lean projection from GET /get_noi_chien) */

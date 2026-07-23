@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
+import { useLiveElapsed } from '../hooks/useLiveElapsed';
 
 interface StageProgressProps {
   elapsedMs: number;
@@ -7,27 +8,17 @@ interface StageProgressProps {
   frozen?: boolean;
 }
 
-// Cap interpolation so the progress bar freezes when realtime updates stop.
-const MAX_INTERP = 2000;
-
 export const StageProgress: React.FC<StageProgressProps> = ({ elapsedMs, receivedAt, targetMin, frozen = false }) => {
-  const [now, setNow] = useState(Date.now());
-
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  const localDelta = frozen ? 0 : Math.min(Date.now() - receivedAt, MAX_INTERP);
-  const elapsedMin = (elapsedMs + localDelta) / 60000;
+  // Shared server-authoritative timer: same interpolation + stall cap + 1 s tick
+  // as the Overview card, so the two views always show the same number.
+  const totalMs = useLiveElapsed(elapsedMs, receivedAt, true, frozen);
+  const elapsedMin = totalMs / 60000;
   const isOvertime = targetMin > 0 && elapsedMin > targetMin;
   const pct = targetMin > 0 ? Math.min((elapsedMin / targetMin) * 100, 100) : 0;
-  const elapsedText = elapsedMin.toFixed(1);
+  const totalSeconds = Math.floor(Math.max(0, totalMs) / 1000);
+  const elapsedText = `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, '0')}`;
   const targetText = targetMin > 0 ? String(Math.round(targetMin)) : '--';
   const fillColor = isOvertime ? '#fd7e14' : '#2196f3';
-
-  // `now` drives the once-per-second interpolation repaint.
-  void now;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '4px 0 12px' }}>

@@ -15,6 +15,7 @@ export interface FryerStatus {
   running: boolean;        // a batch is active (stage_elapsed_ms !== null)
   stage: number | null;    // current active stage (1..4) or null
   elapsedMs: number;       // active-stage elapsed (server-authoritative)
+  receivedAt: number;      // local time the elapsed measurement is anchored to (now − age)
   targetMin: number;       // active-stage target minutes
   targetTemperature: number | null; // active-stage temperature setpoint (stages 1..3)
   tongThoiGian: number;    // total run time (phút)
@@ -26,6 +27,7 @@ const EMPTY: Omit<FryerStatus, 'n'> = {
   running: false,
   stage: null,
   elapsedMs: 0,
+  receivedAt: 0,
   targetMin: 0,
   targetTemperature: null,
   tongThoiGian: 0,
@@ -82,12 +84,14 @@ export function useAllFryers(): FryerStatus[] {
       const onData = (payload: StagePayload[] | NoiChienDataPayload) => {
         let stages: StagePayload[];
         let elapsedMs: number | null;
+        let ageMs = 0;
         if (Array.isArray(payload)) {
           stages = payload;
           elapsedMs = null;
         } else {
           stages = payload.stages;
           elapsedMs = payload.stage_elapsed_ms ?? null;
+          ageMs = Math.max(0, payload.elapsed_age_ms ?? 0);
         }
         if (!Array.isArray(stages) || stages.length === 0) return;
 
@@ -101,6 +105,9 @@ export function useAllFryers(): FryerStatus[] {
           running,
           stage: stageNum,
           elapsedMs: elapsedMs ?? 0,
+          // Anchor to when the server measured it, so a stale join-snapshot
+          // isn't interpolated as if it just arrived.
+          receivedAt: Date.now() - ageMs,
           targetMin: activeStage && stageNum ? targetOf(activeStage, stageNum) : 0,
           targetTemperature: activeStage && stageNum
             ? targetTemperatureOf(activeStage, stageNum)
