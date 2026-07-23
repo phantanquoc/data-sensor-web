@@ -451,7 +451,9 @@ async function readAllRegisters(cfg) {
     isStart[n] = true;
     Start[n]++;
     if (Start[n] > 2) Start[n] = 2;
-    postDataPlc(cfg.model, n, cfg.values, io_, Start[n], giai_doan_1, giai_doan_2, giai_doan_3, giai_doan_4);
+    // await: đảm bảo Start=1 (create doc + gán id_document[n]) hoàn tất trước khi
+    // cycle sau có thể chạy Start=2 push — isReading[n] guard chỉ thực sự bảo vệ khi await.
+    await postDataPlc(cfg.model, n, cfg.values, io_, Start[n], giai_doan_1, giai_doan_2, giai_doan_3, giai_doan_4);
     dbg("đã gét data PLC" + n);
   }
   // Stop
@@ -462,7 +464,7 @@ async function readAllRegisters(cfg) {
   ) {
     Start[n] = 0;
     isStart[n] = false;
-    postDataPlc(cfg.model, n, cfg.values, io_, Start[n], giai_doan_1, giai_doan_2, giai_doan_3, giai_doan_4);
+    await postDataPlc(cfg.model, n, cfg.values, io_, Start[n], giai_doan_1, giai_doan_2, giai_doan_3, giai_doan_4);
     dbg("đã stop gét data PLC" + n);
   }
 }

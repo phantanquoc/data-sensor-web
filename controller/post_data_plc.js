@@ -651,7 +651,9 @@ exports.postDataPlc = async (
           },
           $push: { "giai_doan_1.bien_du_lieu": newData_gd_1 },
         };
-        await model.updateOne({ _id: id_document[n] }, update_1);
+        await model
+          .updateOne({ _id: id_document[n] }, update_1)
+          .catch((err) => console.log(err));
         dbg("nồi chiên " + n + " giai đoạn 1");
       }
     }
@@ -673,7 +675,9 @@ exports.postDataPlc = async (
           },
           $push: { "giai_doan_2.bien_du_lieu": newData_gd_2 },
         };
-        await model.updateOne({ _id: id_document[n] }, update_2);
+        await model
+          .updateOne({ _id: id_document[n] }, update_2)
+          .catch((err) => console.log(err));
         dbg("nồi chiên " + n + " giai đoạn 2");
       }
     }
@@ -695,7 +699,9 @@ exports.postDataPlc = async (
           },
           $push: { "giai_doan_3.bien_du_lieu": newData_gd_3 },
         };
-        await model.updateOne({ _id: id_document[n] }, update_3);
+        await model
+          .updateOne({ _id: id_document[n] }, update_3)
+          .catch((err) => console.log(err));
         dbg("nồi chiên " + n + " giai đoạn: 3");
       }
     }
@@ -712,7 +718,9 @@ exports.postDataPlc = async (
           },
           $push: { "giai_doan_4.bien_du_lieu": newData_gd_4 },
         };
-        await model.updateOne({ _id: id_document[n] }, update_4);
+        await model
+          .updateOne({ _id: id_document[n] }, update_4)
+          .catch((err) => console.log(err));
         dbg("nồi chiên " + n + " giai đoạn 4");
       }
     }
@@ -749,7 +757,7 @@ exports.postDataPlc = async (
           "giai_doan_4.thoi_gian_treo_long": thoi_gian_treo_long_gd4,
         },
       },
-    );
+    ).catch((err) => console.log(err));
     console.log("nồi chiên " + n + " đã stop mẻ");
     io_.to("noi_" + n).emit("noi_chien_" + n + "_stop", {
       stop: "đã hoang thành xong mẽ chiên",
