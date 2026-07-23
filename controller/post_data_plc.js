@@ -37,7 +37,9 @@ const giayVaoGd1 = {};
 // --- HIỆU SUẤT MÁY: ảnh chụp full sensor tại sườn lên đầu tiên trong mẻ, per-fryer. ---
 // m1Prev[n]: trạng thái M1 (bắt đầu kick root) chu kỳ trước (bắt sườn lên).
 // hieuSuatKickRoot[n]: snapshot tại M1 on lần đầu (null = chưa chụp). Reset ở đầu mẻ.
-// hieuSuatNhungHang[n]: snapshot tại M155 on lần đầu (null = chưa chụp). Reset ở đầu mẻ.
+// hieuSuatNhungHang[n]: snapshot tại M155 (null = chưa chụp). Reset ở đầu mẻ.
+//   Chụp lại mỗi cycle khi M155 còn on cho tới khi ap_suat_chan_khong (D672) khác 0 thì khóa
+//   — vì PLC latch D672 trễ vài chu kỳ sau sườn lên nhưng giữ giá trị suốt Giai đoạn 1.
 const m1Prev = {};
 const hieuSuatKickRoot = {};
 const hieuSuatNhungHang = {};
@@ -254,7 +256,7 @@ exports.postDataPlc = async (
       vi_tri_dung: 0,
       bien_du_lieu: [
         {
-          thoi_gian: 0,
+          thoi_gian: "",
           ap_suat_vo_hoi: 0,
           ap_suat_chan_khong: 0,
           ap_suat_vong_nuoc: 0,
@@ -412,10 +414,11 @@ exports.postDataPlc = async (
     }
   }
 
+  const elapsedMeasuredAt = Date.now();
   let stage_elapsed_ms = null;
   for (let k = 1; k <= 4; k++) {
     if (activeFlags[k - 1] && stageStartMs[n][k] !== null) {
-      stage_elapsed_ms = Math.max(0, Date.now() - stageStartMs[n][k]);
+      stage_elapsed_ms = Math.max(0, elapsedMeasuredAt - stageStartMs[n][k]);
       break;
     }
   }
@@ -463,7 +466,13 @@ exports.postDataPlc = async (
   if (Start > 1 && m155Now && !m155Prev[n] && giayVaoGd1[n] == null && batchStartMs[n] != null) {
     giayVaoGd1[n] = Math.max(0, Math.round((Date.now() - batchStartMs[n]) / 1000));
   }
-  if (Start > 1 && m155Now && !m155Prev[n] && !hieuSuatNhungHang[n] && id_document[n]) {
+  // Chụp hiệu suất nhúng hàng. PLC latch D672 (áp suất), D674/D676 (thời gian) tại sườn lên
+  // M155 nhưng có thể trễ vài chu kỳ scan → tại đúng cycle bắt sườn lên, D672 còn 0.
+  // Vì PLC GIỮ ba giá trị này suốt Giai đoạn 1 (chỉ reset khi sang GĐ2), ta chụp lại mỗi
+  // cycle khi M155 còn on cho tới khi áp suất khác 0 thì KHÓA (đọc thẳng từ PLC, gửi lên).
+  const nhungHangLocked =
+    hieuSuatNhungHang[n] != null && Number(hieuSuatNhungHang[n].ap_suat_chan_khong) !== 0;
+  if (Start > 1 && m155Now && !nhungHangLocked && id_document[n]) {
     // Thời gian = M1→M155 (D676 phút + D674 giây), áp suất = D672 float. Đọc thẳng từ PLC.
     const snap = {
       ...buildPerfSnapshot(new Date()),
@@ -474,7 +483,12 @@ exports.postDataPlc = async (
     model
       .updateOne({ _id: id_document[n] }, { $set: { "hieu_suat_may.nhung_hang": snap } })
       .catch((err) => console.log(err));
-    dbg("nồi chiên " + n + " chụp hiệu suất nhúng hàng (M155)");
+    dbg(
+      "nồi chiên " + n + " chụp hiệu suất nhúng hàng (M155)" +
+        (Number(d_672_673) === 0
+          ? " — áp suất=0, đọc lại cycle sau"
+          : " — đã chốt áp suất " + d_672_673),
+    );
   }
   m155Prev[n] = m155Now;
 
@@ -569,8 +583,12 @@ exports.postDataPlc = async (
       },
     },
   ];
-  latestStages[n] = { stages: stagesArray, stage_elapsed_ms };
-  io_.to("noi_" + n).emit("noi_chien_" + n + "_data", { stages: stagesArray, stage_elapsed_ms });
+  // Cache the measurement instant so a late-joining client can be told how old
+  // the cached elapsed value is (elapsed_age_ms) and compensate for it, instead
+  // of treating a stale snapshot as "now" and lagging behind live listeners.
+  latestStages[n] = { stages: stagesArray, stage_elapsed_ms, elapsedMeasuredAt };
+  // Live listeners receive the value at measurement time → age 0.
+  io_.to("noi_" + n).emit("noi_chien_" + n + "_data", { stages: stagesArray, stage_elapsed_ms, elapsed_age_ms: 0 });
 
   // --- Batch lifecycle ---
   // khởi tạo
@@ -740,4 +758,14 @@ exports.postDataPlc = async (
 
 };
 
-exports.getLatestStages = (n) => latestStages[n];
+exports.getLatestStages = (n) => {
+  const snap = latestStages[n];
+  if (!snap) return snap;
+  // Re-derive how stale the cached elapsed value is at join time so the client
+  // can anchor correctly (receivedAt = now - elapsed_age_ms) and match the live
+  // listeners immediately, instead of jumping a full emit-gap later.
+  const elapsed_age_ms = snap.elapsedMeasuredAt != null
+    ? Math.max(0, Date.now() - snap.elapsedMeasuredAt)
+    : 0;
+  return { stages: snap.stages, stage_elapsed_ms: snap.stage_elapsed_ms, elapsed_age_ms };
+};
