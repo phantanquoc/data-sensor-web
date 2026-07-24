@@ -5,10 +5,6 @@ const { formatVietnamTimestamp, formatVietnamDateCode } = require("../utils/time
 const MIN_MACHINE = 1;
 const MAX_MACHINE = 8;
 
-exports.home = (req, res) => {
-  return res.render("view_home", { probs: "PLCDatas" });
-};
-
 function getMachineNumber(req) {
   const n = Number.parseInt(req.query.so_noiChien, 10);
   return Number.isInteger(n) && n >= MIN_MACHINE && n <= MAX_MACHINE ? n : null;
@@ -63,6 +59,17 @@ function temporaryBatchCode(n, doc) {
   return `NC${n}-${datePart}-${String(doc._id).slice(-6).toUpperCase()}`;
 }
 
+/**
+ * Compute batch status from document fields (read-time, not stored).
+ * running  = batch has no stop time yet
+ * completed = stopped AND tong_thoi_gian_chay >= 85
+ * error    = stopped AND tong_thoi_gian_chay < 85
+ */
+function batchStatus(doc) {
+  if (!doc.thoi_gian_stop) return 'running';
+  return (Number(doc.tong_thoi_gian_chay) || 0) >= 85 ? 'completed' : 'error';
+}
+
 function toListItem(doc, n) {
   const startAt = getBatchDate(doc, 'thoi_gian_start_at', 'thoi_gian_start');
   const stopAt = getBatchDate(doc, 'thoi_gian_stop_at', 'thoi_gian_stop');
@@ -77,7 +84,7 @@ function toListItem(doc, n) {
     thoi_gian_stop_at: stopAt,
     tong_thoi_gian_chay: Number(doc.tong_thoi_gian_chay) || 0,
     dong_ep_khoi_dong: Boolean(doc.dong_ep_khoi_dong),
-    trang_thai: running ? 'running' : doc.dong_ep_khoi_dong ? 'forced' : 'completed',
+    trang_thai: batchStatus(doc),
   };
 }
 
@@ -119,6 +126,61 @@ exports.noi_chien = async (req, res) => {
   } catch (err) {
     console.error('get_noi_chien error:', err);
     return res.status(500).json({ error: 'Không thể tải danh sách mẻ chiên' });
+  }
+};
+
+// Tổng hợp thống kê mẻ chiên qua CẢ 8 máy trong khoảng [from, to].
+// Chỉ select field nhẹ (không kéo bien_du_lieu) để không tải nặng Mongo.
+exports.thong_ke = async (req, res) => {
+  const from = parseDateFilter(req.query.from);
+  const to = parseDateFilter(req.query.to, true);
+  if (from === undefined || to === undefined) {
+    return res.status(400).json({ error: 'from/to must use YYYY-MM-DD' });
+  }
+
+  // Tùy chọn: lọc theo 1 máy (?may=1..8). Bỏ trống = gộp cả 8 máy.
+  let machineNums = Array.from({ length: MAX_MACHINE }, (_, i) => i + 1);
+  if (req.query.may != null && req.query.may !== '') {
+    const may = Number(req.query.may);
+    if (!Number.isInteger(may) || may < MIN_MACHINE || may > MAX_MACHINE) {
+      return res.status(400).json({ error: `may must be ${MIN_MACHINE}..${MAX_MACHINE}` });
+    }
+    machineNums = [may];
+  }
+
+  try {
+    const perMachine = await Promise.all(
+      machineNums.map((n) =>
+        plcModels[n]
+          .find()
+          .select('thoi_gian_start thoi_gian_stop thoi_gian_start_at tong_thoi_gian_chay dong_ep_khoi_dong')
+          .lean(),
+      ),
+    );
+
+    const stats = { tong: 0, hoan_thanh: 0, loi: 0, dang_chay: 0 };
+    for (const docs of perMachine) {
+      for (const doc of docs) {
+        const date = getBatchDate(doc, 'thoi_gian_start_at', 'thoi_gian_start');
+        if (from && (!date || date < from)) continue;
+        if (to && (!date || date > to)) continue;
+
+        stats.tong += 1;
+        const status = batchStatus(doc);
+        if (status === 'running') {
+          stats.dang_chay += 1;
+        } else if (status === 'error') {
+          stats.loi += 1;
+        } else {
+          stats.hoan_thanh += 1;
+        }
+      }
+    }
+
+    return res.json(stats);
+  } catch (err) {
+    console.error('thong_ke error:', err);
+    return res.status(500).json({ error: 'Không thể tải thống kê mẻ chiên' });
   }
 };
 
@@ -191,3 +253,5 @@ exports.xoa_noi_chien_detail = async (req, res) => {
     return res.status(500).json({ error: 'Không thể xóa mẻ chiên' });
   }
 };
+
+exports.batchStatus = batchStatus;

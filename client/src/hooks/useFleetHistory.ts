@@ -219,10 +219,12 @@ export function useFleetHistory(): FleetHistoryState {
   const latestBatchStartRef = useRef<Record<number, number>>({});
   const latestRunningRef = useRef<Record<number, boolean>>({});
   const lastStageRef = useRef<Record<number, 1 | 2 | 3 | 4 | null>>({});
-  // Last server-computed stage_elapsed_ms per machine. A new batch re-anchors
-  // stage 1 on the server, so its elapsed restarts near 0 — a drop signals a
-  // new batch even when the stop event was missed and previousStage stayed 1.
+  // Last server-computed stage_elapsed_ms per machine (fallback signal only).
   const lastElapsedRef = useRef<Record<number, number | null>>({});
+  // Whether at least one live socket tick has been processed since REST load.
+  // Used to distinguish "REST loaded a stale batch" (first tick) from a genuine
+  // batch transition observed live (later ticks).
+  const seenLiveTickRef = useRef<Record<number, boolean>>({});
   const revisionRef = useRef<Record<number, number>>({});
   const latestTempPtsRef = useRef<Record<number, ChartPoint[]>>({});
   const latestApPtsRef = useRef<Record<number, ChartPoint[]>>({});
@@ -361,37 +363,63 @@ export function useFleetHistory(): FleetHistoryState {
         if (!sensorTs) return;
 
         const previousStage = lastStageRef.current[machineN];
-        // Server re-anchors stage 1's elapsed on every new batch, so while in
-        // stage 1 a drop in stage_elapsed_ms vs the previous tick means the old
-        // batch ended and a new one began — the reliable signal that catches
-        // the case previousStage>1 / !running both miss (batch that only ever
-        // reached stage 1, or a missed stop event).
+        const firstTick = !seenLiveTickRef.current[machineN];
+
+        // The server re-anchors stage 1 on every new batch, so while in stage 1
+        // `now − stage_elapsed_ms` IS the authoritative batch-start the machine
+        // card uses. Comparing it against the mark the chart currently holds is
+        // the one reliable signal: it works on the very first tick after load
+        // (no need for a previous elapsed), so it catches a stale REST doc whose
+        // giai_doan_1 timestamp is minutes older than the live batch, and it
+        // catches a genuine mid-stream batch change — both cases previousStage
+        // and !running miss.
+        const currentMark = latestBatchStartRef.current[machineN];
+        let serverBatchStart: number | null = null;
+        if (stageNum === 1 && elapsedMs != null) {
+          serverBatchStart = sensorTs.getTime() - elapsedMs;
+        }
+        // Tolerance: real drift within a batch is seconds; a stale load or new
+        // batch is tens of minutes off.
+        const REANCHOR_TOL_MS = 2 * 60 * 1000;
+        const markDrifted =
+          serverBatchStart != null &&
+          (currentMark == null || Math.abs(currentMark - serverBatchStart) > REANCHOR_TOL_MS);
+
         const prevElapsed = lastElapsedRef.current[machineN];
         const elapsedReset =
           stageNum === 1 &&
           elapsedMs != null &&
           prevElapsed != null &&
           elapsedMs < prevElapsed;
+
         const startsNewBatch = stageNum === 1 && (
-          !latestRunningRef.current[machineN]
+          markDrifted
+          || !latestRunningRef.current[machineN]
           || (previousStage != null && previousStage > 1)
           || elapsedReset
         );
 
         if (startsNewBatch) {
-          // TASK 2: Move current latest → previous before resetting
-          const curLatestTemp = latestTempPtsRef.current[machineN];
-          const curLatestAp = latestApPtsRef.current[machineN];
-          const curLatestStart = latestBatchStartRef.current[machineN];
-          if (curLatestStart != null && ((curLatestTemp && curLatestTemp.length > 0) || (curLatestAp && curLatestAp.length > 0))) {
-            prevBatchStartRef.current[machineN] = curLatestStart;
-            prevTempPtsRef.current[machineN] = curLatestTemp ?? [];
-            prevApPtsRef.current[machineN] = curLatestAp ?? [];
+          // Move current latest → previous before resetting, but NOT on the
+          // first live tick after load: there the "current latest" is whatever
+          // REST built (possibly the stale doc we're discarding), and REST has
+          // already loaded the real previous batch — clobbering it would be wrong.
+          if (!firstTick) {
+            const curLatestTemp = latestTempPtsRef.current[machineN];
+            const curLatestAp = latestApPtsRef.current[machineN];
+            const curLatestStart = latestBatchStartRef.current[machineN];
+            if (curLatestStart != null && ((curLatestTemp && curLatestTemp.length > 0) || (curLatestAp && curLatestAp.length > 0))) {
+              prevBatchStartRef.current[machineN] = curLatestStart;
+              prevTempPtsRef.current[machineN] = curLatestTemp ?? [];
+              prevApPtsRef.current[machineN] = curLatestAp ?? [];
+            }
           }
 
-          // Reset latest to new batch
+          // Reset latest to new batch, anchored to the server's batch start so
+          // the first plotted point lands at the correct elapsed offset even if
+          // we detected the new batch late.
           revisionRef.current[machineN] = (revisionRef.current[machineN] ?? 0) + 1;
-          latestBatchStartRef.current[machineN] = sensorTs.getTime();
+          latestBatchStartRef.current[machineN] = serverBatchStart ?? sensorTs.getTime();
           latestRunningRef.current[machineN] = true;
           latestTempPtsRef.current[machineN] = [];
           latestApPtsRef.current[machineN] = [];
@@ -406,6 +434,7 @@ export function useFleetHistory(): FleetHistoryState {
         if (nowPhut < 0) return;
         lastStageRef.current[machineN] = stageNum;
         lastElapsedRef.current[machineN] = elapsedMs;
+        seenLiveTickRef.current[machineN] = true;
 
         // --- Temperature ---
         const tPts = latestTempPtsRef.current[machineN] ?? [];

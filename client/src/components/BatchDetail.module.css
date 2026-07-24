@@ -3,7 +3,8 @@
   box-sizing: border-box;
   margin: 0;
   padding: 22px;
-  background: #fff;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
 }
 
 .detailHeader {
@@ -12,25 +13,25 @@
   gap: 24px;
   padding-right: 48px;
   padding-bottom: 16px;
-  border-bottom: 1px solid #dbe4ee;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .eyebrow {
   margin: 0 0 5px;
-  color: #64748b;
+  color: var(--color-text-muted);
   font-size: 13px;
   font-weight: 700;
 }
 
 .detailHeader h2 {
   margin: 0;
-  color: #153f82;
+  color: var(--color-text-heading);
   font-size: 22px;
 }
 
 .note {
   margin: 7px 0 0;
-  color: #526274;
+  color: var(--color-text-secondary);
   font-size: 14px;
 }
 
@@ -40,7 +41,7 @@
   justify-content: flex-end;
   align-items: center;
   gap: 8px 18px;
-  color: #526274;
+  color: var(--color-text-secondary);
   font-size: 13px;
   text-align: right;
 }
@@ -54,7 +55,7 @@
 }
 
 .headerMeta strong {
-  color: #15803d;
+  color: var(--color-val-green);
   font-size: 16px;
 }
 
@@ -68,8 +69,8 @@
 .stageCard {
   min-width: 0;
   padding: 17px;
-  background: #f8fbff;
-  border: 1px solid #dce7f3;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
   border-radius: 10px;
 }
 
@@ -83,7 +84,7 @@
 
 .stageLabel {
   margin: 0;
-  color: #173e7d;
+  color: var(--color-text-heading);
   font-size: 18px;
   font-weight: 800;
 }
@@ -91,7 +92,7 @@
 .sampleCount {
   display: block;
   margin-top: 4px;
-  color: #718096;
+  color: var(--color-text-muted);
   font-size: 12px;
 }
 
@@ -100,21 +101,21 @@
   flex-direction: column;
   align-items: flex-end;
   gap: 4px;
-  color: #1d78c9;
+  color: var(--color-brand);
   font-size: 13px;
   text-align: right;
 }
 
 .stageTimes small {
-  color: #718096;
+  color: var(--color-text-muted);
   font-size: 11px;
 }
 
 .metricGroup {
   margin-top: 13px;
   overflow: hidden;
-  background: #fff;
-  border: 1px solid #e2eaf3;
+  background: var(--color-surface-overlay);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
 }
 
@@ -127,9 +128,9 @@
   font-size: 14px;
 }
 
-.temperature h3 { color: #dc2638; background: #fff3f4; }
-.pressure h3 { color: #0284a8; background: #eefbfe; }
-.current h3 { color: #ea6900; background: #fff7ed; }
+.temperature h3 { color: var(--color-val-red); background: var(--color-temperature-tint); }
+.pressure h3 { color: var(--color-val-teal); background: var(--color-pressure-tint); }
+.current h3 { color: var(--color-val-orange); background: var(--color-current-tint); }
 
 .metricTable {
   overflow-x: auto;
@@ -146,15 +147,15 @@
 }
 
 .metricRowHeader {
-  color: #7a8796;
-  border-bottom: 1px solid #e5ebf2;
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border);
   font-size: 11px;
   font-weight: 700;
 }
 
 .metricRow {
-  color: #324152;
-  border-bottom: 1px solid #eef2f6;
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border-row);
   font-size: 12px;
 }
 
@@ -162,19 +163,21 @@
 
 .metricRow b {
   padding: 4px 5px;
-  color: #1676ce;
-  background: #e6f3ff;
+  color: var(--color-val-blue);
+  background: var(--color-metric-chip-bg);
+  border: 1px solid var(--color-metric-chip-border);
   border-radius: 5px;
   font-size: 12px;
+  font-family: 'JetBrains Mono', monospace;
   text-align: center;
 }
 
-/* Bảng "Hiệu suất máy" — nằm trên grid 4 giai đoạn */
+/* Performance table */
 .perfSection {
   margin-bottom: 16px;
-  border: 1px solid #e5ebf2;
+  border: 1px solid var(--color-border);
   border-radius: 12px;
-  background: #fff;
+  background: var(--color-surface-raised);
   overflow: hidden;
 }
 
@@ -185,9 +188,9 @@
   margin: 0;
   padding: 11px 14px;
   font-size: 15px;
-  color: #0284a8;
-  background: #eefbfe;
-  border-bottom: 1px solid #e5ebf2;
+  color: var(--color-val-teal);
+  background: var(--color-pressure-tint);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .perfTable {
@@ -205,15 +208,15 @@
 }
 
 .perfHeader {
-  color: #7a8796;
-  border-bottom: 1px solid #e5ebf2;
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border);
   font-size: 12px;
   font-weight: 700;
 }
 
 .perfRow {
-  color: #324152;
-  border-bottom: 1px solid #eef2f6;
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border-row);
   font-size: 13px;
 }
 
@@ -221,10 +224,12 @@
 
 .perfRow b {
   padding: 5px 6px;
-  color: #0284a8;
-  background: #eefbfe;
+  color: var(--color-val-teal);
+  background: var(--color-pressure-tint);
+  border: 1px solid rgb(var(--color-val-teal-rgb) / 0.15);
   border-radius: 5px;
   font-size: 13px;
+  font-family: 'JetBrains Mono', monospace;
   text-align: center;
 }
 
@@ -233,7 +238,7 @@
   align-items: center;
   gap: 7px;
   padding: 14px 2px 2px;
-  color: #718096;
+  color: var(--color-text-muted);
   font-size: 13px;
 }
 

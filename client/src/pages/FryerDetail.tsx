@@ -1,16 +1,34 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { Activity } from 'lucide-react';
 import { TabBar } from '../components/TabBar';
 import { StageColumn } from '../components/StageColumn';
 import { SensorGrid } from '../components/SensorGrid';
 import { BatchList } from '../components/BatchList';
+import { StatsBar } from '../components/StatsBar';
 import { BatchDetailDrawer } from '../components/BatchDetailDrawer';
 import { Toast } from '../components/Toast';
 import { useSocket } from '../hooks/useSocket';
 import { useFryerData } from '../hooks/useFryerData';
 import { getNoiChien, getNoiChienDetail, suaNoiChienDetail, xoaNoiChienDetail } from '../api';
 import type { StagePayload, SensorData, SetGiaiDoanStages123 } from '../types';
+import type { Period } from '../hooks/useThongKe';
 import styles from '../App.module.css';
+
+const PERIODS: { key: Period; label: string }[] = [
+  { key: 'day', label: 'Ngày' },
+  { key: 'week', label: 'Tuần' },
+  { key: 'month', label: 'Tháng' },
+  { key: 'custom', label: 'Tùy chỉnh' },
+];
+
+/** Hôm nay dạng YYYY-MM-DD theo giờ máy (múi giờ VN). */
+function todayYmd(): string {
+  const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+}
 
 const ZERO_SENSOR: SensorData = {
   ap_suat_vo_hoi: 0,
@@ -31,6 +49,9 @@ export const FryerDetail: React.FC = () => {
   const soNoiChien = n && /^[1-8]$/.test(n) ? n : '1';
 
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [period, setPeriod] = useState<Period>('day');
+  const [customFrom, setCustomFrom] = useState<string>(todayYmd());
+  const [customTo, setCustomTo] = useState<string>(todayYmd());
 
   const {
     stages,
@@ -113,48 +134,100 @@ export const FryerDetail: React.FC = () => {
   const tongThoiGian = stages[0]?.tong_thoi_gian_chay ?? 0;
 
   return (
-    <div>
+    <div className={styles.page}>
       <TabBar activeTab={soNoiChien} onTabChange={handleTabChange} />
 
-      <div className={styles.content}>
-        <div className={styles.tabContent}>
-          <h2 className={styles.heading}>
-            <div>
-              <span>Hệ Chiên </span>
-              <span>{soNoiChien}</span>
+      <div className={styles.main}>
+        <div className={styles.content}>
+          <div className={styles.tabContent}>
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <h2 className="flex items-center gap-3 text-2xl font-bold text-text-primary">
+                <Activity size={20} className="text-brand" aria-hidden="true" />
+                <span>Hệ Chiên </span>
+                <span className="text-brand">{soNoiChien}</span>
+              </h2>
+
+              <div className="inline-flex self-start rounded-full border border-border bg-surface-raised p-1 sm:self-auto">
+                {PERIODS.map((p) => (
+                  <button
+                    key={p.key}
+                    type="button"
+                    onClick={() => setPeriod(p.key)}
+                    className={`rounded-full px-4 py-1.5 text-sm font-semibold transition ${
+                      period === p.key ? 'bg-brand text-white shadow-sm' : 'text-text-secondary hover:text-text-primary'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
             </div>
-          </h2>
 
-          <div className={styles.detailCardsRow}>
-            {stages.map((stage, idx) => (
-              <StageColumn
-                key={idx}
-                stage={stage}
-                stageIndex={idx + 1}
-                donutElapsedMs={donut.stage === idx + 1 ? donut.elapsedMs : null}
-                donutReceivedAt={donut.stage === idx + 1 ? donut.receivedAt : 0}
-                donutTargetMin={donut.stage === idx + 1 ? donut.targetMin : 0}
-                activeDonutStage={donut.stage}
-                completedElapsedMs={stageElapsedMsByStage[idx + 1] ?? null}
+            {period === 'custom' && (
+              <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface-raised px-4 py-3">
+                <label className="flex items-center gap-2 text-sm font-medium text-text-secondary">
+                  Từ ngày
+                  <input
+                    type="date"
+                    value={customFrom}
+                    max={customTo}
+                    onChange={(e) => setCustomFrom(e.target.value)}
+                    className="rounded-lg border border-border bg-surface-overlay px-3 py-1.5 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20"
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-sm font-medium text-text-secondary">
+                  Đến ngày
+                  <input
+                    type="date"
+                    value={customTo}
+                    min={customFrom}
+                    max={todayYmd()}
+                    onChange={(e) => setCustomTo(e.target.value)}
+                    className="rounded-lg border border-border bg-surface-overlay px-3 py-1.5 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20"
+                  />
+                </label>
+              </div>
+            )}
+
+            <div className="mb-4">
+              <StatsBar
+                period={period}
+                custom={{ from: customFrom, to: customTo }}
+                may={Number(soNoiChien)}
               />
-            ))}
+            </div>
 
-            <SensorGrid
-              data={sensorData}
-              tongThoiGian={tongThoiGian}
-              temperatureTarget={activeTemperatureTarget}
-            />
+            <div className={styles.detailCardsRow}>
+              {stages.map((stage, idx) => (
+                <StageColumn
+                  key={idx}
+                  stage={stage}
+                  stageIndex={idx + 1}
+                  donutElapsedMs={donut.stage === idx + 1 ? donut.elapsedMs : null}
+                  donutReceivedAt={donut.stage === idx + 1 ? donut.receivedAt : 0}
+                  donutTargetMin={donut.stage === idx + 1 ? donut.targetMin : 0}
+                  activeDonutStage={donut.stage}
+                  completedElapsedMs={stageElapsedMsByStage[idx + 1] ?? null}
+                />
+              ))}
+
+              <SensorGrid
+                data={sensorData}
+                tongThoiGian={tongThoiGian}
+                temperatureTarget={activeTemperatureTarget}
+              />
+            </div>
           </div>
         </div>
-      </div>
 
-      <BatchList
-        batchList={batchList}
-        onView={handleViewBatch}
-        onEdit={handleEditBatch}
-        onDelete={handleDeleteBatch}
-        onRefresh={handleRefreshBatchList}
-      />
+        <BatchList
+          batchList={batchList}
+          onView={handleViewBatch}
+          onEdit={handleEditBatch}
+          onDelete={handleDeleteBatch}
+          onRefresh={handleRefreshBatchList}
+        />
+      </div>
 
       {batchDetail && <BatchDetailDrawer data={batchDetail} onClose={() => setBatchDetail(null)} />}
 

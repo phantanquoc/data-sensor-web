@@ -1,7 +1,9 @@
-import React, { FormEvent, useState } from 'react';
-import { Eye, Filter, Pencil, Save, Trash2, X } from 'lucide-react';
+import React, { FormEvent, useEffect, useState } from 'react';
+import { ChevronLeft, ChevronRight, Eye, Filter, Pencil, Save, Trash2, X } from 'lucide-react';
 import styles from './BatchList.module.css';
 import type { BatchListItem } from '../types';
+
+const PAGE_SIZES = [10, 20, 50] as const;
 
 interface BatchFilters {
   from?: string;
@@ -24,7 +26,7 @@ interface BatchListProps {
 const STATUS_LABELS: Record<string, string> = {
   running: 'Đang chạy',
   completed: 'Hoàn thành',
-  forced: 'Đóng ép',
+  error: 'Lỗi',
 };
 
 export const BatchList: React.FC<BatchListProps> = ({
@@ -41,6 +43,21 @@ export const BatchList: React.FC<BatchListProps> = ({
   const [editing, setEditing] = useState<BatchListItem | null>(null);
   const [draft, setDraft] = useState<BatchEditValues>({ ma_me_chien: '', ghi_chu: '' });
   const [saving, setSaving] = useState(false);
+  const [pageSize, setPageSize] = useState<number>(PAGE_SIZES[0]);
+  const [page, setPage] = useState(1);
+
+  const total = batchList.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  // Giữ trang hợp lệ khi danh sách hoặc số dòng/trang thay đổi
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
+
+  const startIndex = (page - 1) * pageSize;
+  const pageItems = batchList.slice(startIndex, startIndex + pageSize);
+  const rangeStart = total === 0 ? 0 : startIndex + 1;
+  const rangeEnd = Math.min(startIndex + pageSize, total);
 
   const refresh = async () => {
     if (from && to && from > to) {
@@ -110,7 +127,7 @@ export const BatchList: React.FC<BatchListProps> = ({
             <h2 className={styles.title}>Danh sách mẻ chiên</h2>
             <p className={styles.subtitle}>Lịch sử của hệ chiên đang xem</p>
           </div>
-          <span className={styles.count}>{batchList.length} mẻ</span>
+          <span className={styles.count}>{total} mẻ</span>
         </div>
 
         <div className={styles.filters}>
@@ -144,9 +161,9 @@ export const BatchList: React.FC<BatchListProps> = ({
               </tr>
             </thead>
             <tbody>
-              {batchList.length === 0 ? (
+              {pageItems.length === 0 ? (
                 <tr><td className={styles.empty} colSpan={7}>Không có mẻ phù hợp</td></tr>
-              ) : batchList.map((batch) => (
+              ) : pageItems.map((batch) => (
                 <tr key={batch._id}>
                   <td className={styles.code}>{batch.ma_me_chien}</td>
                   <td>{batch.thoi_gian_start || '—'}</td>
@@ -178,6 +195,55 @@ export const BatchList: React.FC<BatchListProps> = ({
               ))}
             </tbody>
           </table>
+        </div>
+
+        <div className={styles.pagination}>
+          <div className={styles.pageSize}>
+            <span className={styles.pageSizeLabel}>Số dòng</span>
+            <div className={styles.pageSizeTabs} role="tablist" aria-label="Số dòng mỗi trang">
+              {PAGE_SIZES.map((size) => (
+                <button
+                  key={size}
+                  type="button"
+                  role="tab"
+                  aria-selected={pageSize === size}
+                  className={`${styles.pageSizeTab} ${pageSize === size ? styles.pageSizeTabActive : ''}`}
+                  onClick={() => {
+                    setPageSize(size);
+                    setPage(1);
+                  }}
+                >
+                  {size}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <span className={styles.pageInfo}>
+            {rangeStart}-{rangeEnd} / {total} kết quả
+          </span>
+
+          <div className={styles.pageNav}>
+            <button
+              type="button"
+              className={styles.pageBtn}
+              aria-label="Trang trước"
+              disabled={page <= 1}
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <span className={styles.pageCurrent}>{page} / {totalPages}</span>
+            <button
+              type="button"
+              className={styles.pageBtn}
+              aria-label="Trang sau"
+              disabled={page >= totalPages}
+              onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
         </div>
       </div>
 

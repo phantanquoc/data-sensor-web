@@ -19,6 +19,7 @@ import {
   Legend,
 } from 'recharts';
 import type { MachineSeries } from '../hooks/useFleetHistory';
+import { useTheme } from '../hooks/useTheme';
 
 interface FleetLineChartProps {
   /** Chart title displayed above the chart */
@@ -55,8 +56,8 @@ const CustomTooltip: React.FC<CustomTooltipProps> = ({ active, payload, label, u
   if (visible.length === 0) return null;
 
   return (
-    <div className="rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-card text-sm">
-      <p className="mb-2 font-semibold text-stage">
+    <div className="rounded-xl border border-border bg-surface-raised px-4 py-3 shadow-card text-sm">
+      <p className="mb-2 font-semibold text-text-primary">
         Phút: <span className="text-val-blue">{typeof label === 'number' ? label.toFixed(1) : '--'}</span>
       </p>
       {visible.map((item) => {
@@ -68,15 +69,15 @@ const CustomTooltip: React.FC<CustomTooltipProps> = ({ active, payload, label, u
               className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full"
               style={{ background: item.color }}
             />
-            <span className="text-gray-600">{item.name}</span>
-            <span className="mx-1 text-gray-400">·</span>
-            <span className="text-gray-500 text-xs">
+            <span className="text-text-secondary">{item.name}</span>
+            <span className="mx-1 text-text-muted">·</span>
+            <span className="text-text-muted text-xs">
               GĐ {stage}
             </span>
-            <span className="mx-1 text-gray-400">·</span>
-            <span className="font-bold text-stage">
+            <span className="mx-1 text-text-muted">·</span>
+            <span className="font-bold text-text-primary">
               {displayVal}
-              <span className="ml-0.5 text-xs font-normal text-gray-500">{unit}</span>
+              <span className="ml-0.5 text-xs font-normal text-text-secondary">{unit}</span>
             </span>
           </div>
         );
@@ -134,6 +135,13 @@ const buildYScale = (
   return { domain: [lo, hi], ticks };
 };
 
+/* --- Chart chrome colors by theme ----------------------------------------- */
+
+const CHART_CHROME = {
+  dark: { grid: '#2a3f52', tick: '#94a3b8', label: '#64748b', gridOpacity: 0.25 },
+  light: { grid: '#e2e8f0', tick: '#475569', label: '#64748b', gridOpacity: 1 },
+} as const;
+
 /* --- Main chart ------------------------------------------------------------ */
 
 export const FleetLineChart: React.FC<FleetLineChartProps> = ({
@@ -143,6 +151,8 @@ export const FleetLineChart: React.FC<FleetLineChartProps> = ({
   previousSeries,
 }) => {
   const [view, setView] = useState<ViewMode>('latest');
+  const { theme } = useTheme();
+  const chrome = CHART_CHROME[theme];
   const activeSeries = view === 'latest' ? latestSeries : previousSeries;
   const hasPrevious = previousSeries.length > 0;
 
@@ -238,16 +248,16 @@ export const FleetLineChart: React.FC<FleetLineChartProps> = ({
       : 'Chưa có mẻ trước';
 
     return (
-      <div className="flex flex-col rounded-2xl bg-white p-6 shadow-card">
+      <div className="flex flex-col rounded-2xl border border-border bg-surface-raised p-6">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-bold text-stage">{title}</h2>
+          <h2 className="text-base font-bold text-text-primary">{title}</h2>
           <SegmentedToggle
             view={view}
             onChangeView={setView}
             previousDisabled={!hasPrevious}
           />
         </div>
-        <div className="flex h-36 items-center justify-center text-sm text-gray-400">
+        <div className="flex h-36 items-center justify-center text-sm text-text-muted">
           {emptyMsg}
         </div>
       </div>
@@ -255,9 +265,9 @@ export const FleetLineChart: React.FC<FleetLineChartProps> = ({
   }
 
   return (
-    <div className="flex flex-col rounded-2xl bg-white p-6 shadow-card">
+    <div className="flex flex-col rounded-2xl border border-border bg-surface-raised p-6">
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-base font-bold text-stage">{title}</h2>
+        <h2 className="text-base font-bold text-text-primary">{title}</h2>
         <SegmentedToggle
           view={view}
           onChangeView={setView}
@@ -266,31 +276,31 @@ export const FleetLineChart: React.FC<FleetLineChartProps> = ({
       </div>
       <ResponsiveContainer width="100%" height={280}>
         <LineChart data={merged} margin={{ top: 4, right: 16, left: 4, bottom: 4 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+          <CartesianGrid strokeDasharray="3 3" stroke={chrome.grid} strokeOpacity={chrome.gridOpacity} />
           <XAxis
             dataKey="phut"
             type="number"
             domain={[0, Math.ceil(xMax + 2)]}
             tickCount={8}
             tickFormatter={(v: number) => v.toFixed(0)}
-            label={{ value: 'Phút', position: 'insideBottomRight', offset: -4, fontSize: 11, fill: '#9ca3af' }}
-            tick={{ fontSize: 11, fill: '#6b7280' }}
-            stroke="#d1d5db"
+            label={{ value: 'Phút', position: 'insideBottomRight', offset: -4, fontSize: 11, fill: chrome.label }}
+            tick={{ fontSize: 11, fill: chrome.tick }}
+            stroke={chrome.grid}
           />
           <YAxis
             type="number"
             domain={yScale.domain}
             ticks={yScale.ticks}
             allowDecimals={false}
-            tick={{ fontSize: 11, fill: '#6b7280' }}
-            stroke="#d1d5db"
+            tick={{ fontSize: 11, fill: chrome.tick }}
+            stroke={chrome.grid}
             tickFormatter={(v: number) => v.toFixed(0)}
             width={40}
           />
           <Tooltip content={<CustomTooltip unit={unit} />} />
           <Legend
             formatter={(value: string) => (
-              <span className="text-xs text-gray-600">{value}</span>
+              <span className="text-xs text-text-secondary">{value}</span>
             )}
           />
           {presentMachines.map((s) => (
@@ -326,13 +336,13 @@ const SegmentedToggle: React.FC<SegmentedToggleProps> = ({
   onChangeView,
   previousDisabled,
 }) => {
-  const baseBtn = 'px-3 py-1 text-xs font-semibold rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-300';
+  const baseBtn = 'px-3 py-1 text-xs font-semibold rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-brand/30';
   const activeBtn = 'bg-brand text-white shadow-pill';
-  const inactiveBtn = 'text-gray-500 hover:text-stage';
-  const disabledBtn = 'text-gray-300 cursor-not-allowed';
+  const inactiveBtn = 'text-text-secondary hover:text-text-primary';
+  const disabledBtn = 'text-text-muted cursor-not-allowed';
 
   return (
-    <div className="flex gap-1 rounded-xl bg-gray-100 p-0.5">
+    <div className="flex gap-1 rounded-xl border border-border bg-surface-overlay p-0.5">
       <button
         type="button"
         aria-pressed={view === 'latest'}

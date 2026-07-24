@@ -47,32 +47,32 @@ export const MachineCard: React.FC<MachineCardProps> = ({ status }) => {
 
   const statusLabel = !connected ? 'Mất kết nối' : running ? 'Đang chạy' : 'Dừng';
   const badgeClasses = !connected
-    ? 'bg-gray-100 text-gray-500'
+    ? 'bg-surface-overlay text-text-muted'
     : running
-      ? 'bg-green-100 text-val-green'
-      : 'bg-gray-100 text-gray-500';
+      ? 'bg-val-green/15 text-val-green'
+      : 'bg-surface-overlay text-text-muted';
   const dotClasses = !connected
-    ? 'bg-gray-400'
+    ? 'bg-text-muted'
     : running
       ? 'bg-val-green animate-pulse'
-      : 'bg-gray-400';
+      : 'bg-text-muted';
 
   return (
     <Link
       to={`/may/${n}`}
-      className="group flex min-h-[280px] flex-col gap-5 rounded-2xl bg-gradient-to-br from-white to-[#f2f8ff] p-6 shadow-card transition duration-200 hover:-translate-y-1 hover:shadow-cardHover focus:outline-none focus:ring-2 focus:ring-brand"
+      className="group flex min-h-[280px] flex-col gap-5 rounded-2xl border border-border bg-surface-raised p-6 shadow-card transition duration-200 hover:-translate-y-1 hover:shadow-cardHover hover:border-brand/40 focus:outline-none focus:ring-2 focus:ring-brand"
     >
       {/* Header: name + status badge */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <span
             className={`grid h-10 w-10 place-items-center rounded-xl ${
-              running ? 'bg-brand text-white' : 'bg-gray-100 text-gray-400'
+              running ? 'bg-brand text-white' : 'bg-surface-overlay text-text-muted'
             }`}
           >
             <Flame size={20} />
           </span>
-          <span className="text-lg font-bold text-stage">Hệ Chiên {n}</span>
+          <span className="text-lg font-bold text-text-primary">Hệ Chiên {n}</span>
         </div>
         <span
           className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${badgeClasses}`}
@@ -84,18 +84,18 @@ export const MachineCard: React.FC<MachineCardProps> = ({ status }) => {
 
       {/* Current stage + total time */}
       <div className="flex items-center justify-between text-sm">
-        <span className="inline-flex items-center gap-1.5 font-semibold text-gray-600">
-          <Power size={14} className={running ? 'text-val-green' : 'text-gray-400'} />
+        <span className="inline-flex items-center gap-1.5 font-semibold text-text-secondary">
+          <Power size={14} className={running ? 'text-val-green' : 'text-text-muted'} />
           {running && stage ? STAGE_LABEL[stage] : 'Không hoạt động'}
         </span>
-        <span className="font-semibold text-gray-500">
+        <span className="font-semibold text-text-secondary">
           Tổng: <b className="text-val-blue">{tongThoiGian}</b> phút
         </span>
       </div>
 
       {/* Horizontal progress bar */}
       <div className="flex flex-col gap-1.5">
-        <div className="flex items-center justify-between text-xs text-gray-500">
+        <div className="flex items-center justify-between text-xs text-text-secondary">
           <span>Thời gian chạy</span>
           <span className="font-semibold">
             {running ? (
@@ -111,7 +111,7 @@ export const MachineCard: React.FC<MachineCardProps> = ({ status }) => {
             )}
           </span>
         </div>
-        <div className="h-2.5 w-full overflow-hidden rounded-full bg-gray-200">
+        <div className="h-2.5 w-full overflow-hidden rounded-full bg-surface-overlay">
           <div
             className={`h-full rounded-full transition-all duration-300 ${
               isOvertime ? 'bg-val-orange' : 'bg-brand'
@@ -122,7 +122,7 @@ export const MachineCard: React.FC<MachineCardProps> = ({ status }) => {
       </div>
 
       {/* Key sensors — 2×2 grid */}
-      <div className="grid grid-cols-2 gap-3 border-t border-gray-100 pt-3">
+      <div className="grid grid-cols-2 gap-3 border-t border-border pt-3">
         <Metric
           icon={<Thermometer size={13} />}
           label="Nhiệt độ"
@@ -181,13 +181,13 @@ const Metric: React.FC<{
   color?: keyof typeof COLOR_CLASSES;
 }> = ({ icon, label, value, targetValue, warning = false, unit, color }) => {
   const cls = color ? COLOR_CLASSES[color] : null;
-  const iconClass = warning ? (cls?.icon ?? 'text-gray-600') : 'text-white';
-  const valueClass = warning ? (cls?.value ?? 'text-stage') : 'text-white';
+  const iconClass = warning ? (cls?.icon ?? 'text-text-secondary') : 'text-white';
+  const valueClass = warning ? (cls?.value ?? 'text-text-primary') : 'text-white';
 
   return (
     <div
       className={`flex flex-col items-center gap-0.5 rounded-xl px-2 py-2 text-center transition-colors ${
-        warning ? 'bg-orange-100' : 'bg-brand'
+        warning ? 'bg-val-orange/15 border border-val-orange/30' : 'bg-brand/90'
       }`}
     >
       <span

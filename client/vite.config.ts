@@ -7,6 +7,7 @@ import react from '@vitejs/plugin-react';
 const BACKEND = process.env.BACKEND_URL || 'http://localhost:3001';
 
 const proxy = {
+  '/thong_ke': BACKEND,
   '/get_noi_chien': BACKEND,
   '/get_noi_chien_detail': BACKEND,
   '/sua_noi_chien_detail': BACKEND,

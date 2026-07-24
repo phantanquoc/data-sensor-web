@@ -63,6 +63,14 @@ export interface NoiChienDataPayload {
   elapsed_age_ms?: number;
 }
 
+/** Aggregate stats across all 8 fryers (GET /thong_ke) */
+export interface ThongKe {
+  tong: number;        // tổng số mẻ trong kỳ
+  hoan_thanh: number;  // đã dừng & tong_thoi_gian_chay >= 85
+  loi: number;         // mẻ lỗi: đã dừng & tong_thoi_gian_chay < 85
+  dang_chay: number;   // chưa dừng
+}
+
 /** Batch list item (lean projection from GET /get_noi_chien) */
 export interface BatchListItem {
   _id: string;
@@ -74,7 +82,7 @@ export interface BatchListItem {
   thoi_gian_stop_at?: string | null;
   tong_thoi_gian_chay: number;
   dong_ep_khoi_dong?: boolean;
-  trang_thai?: 'running' | 'completed' | 'forced';
+  trang_thai?: 'running' | 'completed' | 'error';
 }
 
 /** bien_du_lieu entry for stages 1-3 */

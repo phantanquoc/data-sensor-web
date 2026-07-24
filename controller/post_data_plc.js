@@ -15,9 +15,8 @@ const pushCount = {};            // pushCount[n] = {1,2,3,4} đếm số chu k�
 const latestStages = {};
 
 // Server-authoritative stage-start timestamps (RAM). Anchored on each stage's
-// rising edge; cleared on its falling edge. Lost on restart — a restart closes
-// the running batch (cleanupOrphanBatches) and starts a fresh one, so elapsed
-// legitimately restarts rather than being recovered.
+// rising edge; cleared on its falling edge. Lost on restart — elapsed timers
+// restart from zero (stage timestamps are RAM-only, not recovered).
 // stageStartMs[n] = { 1: ms|null, 2: ms|null, 3: ms|null, 4: ms|null }
 const stageStartMs = {};
 
@@ -776,4 +775,27 @@ exports.getLatestStages = (n) => {
     ? Math.max(0, Date.now() - snap.elapsedMeasuredAt)
     : 0;
   return { stages: snap.stages, stage_elapsed_ms: snap.stage_elapsed_ms, elapsed_age_ms };
+};
+
+// --- Resume helpers (used by app.js on restart) ---
+
+/**
+ * Restore in-memory doc id so update/stop branches write to the correct document.
+ */
+exports.setBatchDocId = function setBatchDocId(n, id) {
+  id_document[n] = id;
+};
+
+/**
+ * Pure predicate: does liveD60 indicate a NEW physical batch started
+ * while the server was down? (D60 went backwards meaningfully.)
+ * @param {number|undefined} liveD60  - machine's current total run-time (minutes)
+ * @param {number|undefined} resumedTong - tong_thoi_gian_chay stored on the open doc
+ * @param {number} [eps=2] - tolerance in minutes for rounding/noise
+ * @returns {boolean} true => new batch started during downtime, do NOT resume old doc
+ */
+exports.shouldResumeAsNewBatch = function shouldResumeAsNewBatch(liveD60, resumedTong, eps = 2) {
+  const live = Number(liveD60) || 0;
+  const prev = Number(resumedTong) || 0;
+  return live + eps < prev;
 };

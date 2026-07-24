@@ -1,26 +1,52 @@
 .stageCard {
   width: 100%;
   min-width: 0;
-  height: 400px;
-  padding: 16px;
-  border: 4px solid transparent;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #f8f9fa, #eef3f7);
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-  font-family: Arial, sans-serif;
+  min-height: 380px;
+  padding: 18px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-card);
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  transition: all 0.25s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.stageCard::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--color-gradient-line-start), var(--color-gradient-line-mid), var(--color-gradient-line-start));
+  border-radius: 14px 14px 0 0;
 }
 
 .activeStage {
-  border-color: #2196f3;
-  box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.18), 0 7px 20px rgba(33, 150, 243, 0.28);
+  border-color: var(--color-brand);
+  box-shadow: 0 0 0 1px var(--color-stage-glow), 0 8px 24px var(--color-stage-shadow);
+}
+
+.activeStage::before {
+  background: linear-gradient(90deg, transparent, var(--color-brand), transparent);
+  animation: scanline 2.5s ease-in-out infinite;
+}
+
+@keyframes scanline {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
 }
 
 .stageTitle {
-  margin: 0 0 12px 0;
-  font-size: 20px;
-  font-weight: bold;
-  color: #1f3c88;
+  margin: 0 0 14px 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-text-heading);
   text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .progressSlot {
@@ -31,59 +57,152 @@
 .row {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 8px;
-  margin: 6px 0;
-  padding: 7px 0;
-  border-bottom: 1px solid #ddd;
+  margin: 0;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--color-border-row);
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+
+.row:hover {
+  background: var(--color-row-hover);
 }
 
 .rowLast {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 8px;
-  margin: 6px 0;
-  padding: 7px 0;
+  margin: 0;
+  padding: 9px 10px;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+
+.rowLast:hover {
+  background: var(--color-row-hover);
 }
 
 .rowLabel {
-  color: #333;
-  font-size: 14px;
-  font-weight: 600;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* Can thang cot gia tri: so can phai trong vung co dinh, don vi can trai vung co dinh */
+.valueBlue,
+.valueGreen,
+.valueOrange,
+.valuePurple,
+.valueRed,
+.valueTeal {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 88px;
+  flex-shrink: 0;
+}
+
+.valueBlue > span,
+.valueGreen > span,
+.valueOrange > span,
+.valuePurple > span,
+.valueRed > span,
+.valueTeal > span {
+  min-width: 40px;
+  text-align: left;
+  flex-shrink: 0;
 }
 
 .valueBlue {
-  color: #007bff;
-  font-size: 16px;
+  color: var(--color-val-blue);
+  font-size: 15px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-weight: 700;
+}
+
+.valueBlue span {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
 }
 
 .valueGreen {
-  color: #28a745;
-  font-size: 16px;
+  color: var(--color-val-green);
+  font-size: 15px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-weight: 700;
+}
+
+.valueGreen span {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
 }
 
 .valueOrange {
-  color: #fd7e14;
-  font-size: 16px;
+  color: var(--color-val-orange);
+  font-size: 15px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-weight: 700;
+}
+
+.valueOrange span {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
 }
 
 .valuePurple {
-  color: #6f42c1;
-  font-size: 16px;
+  color: var(--color-val-purple);
+  font-size: 15px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-weight: 700;
+}
+
+.valuePurple span {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
 }
 
 .valueRed {
-  color: #dc3545;
-  font-size: 16px;
+  color: var(--color-val-red);
+  font-size: 15px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-weight: 700;
+}
+
+.valueRed span {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
 }
 
 .valueTeal {
-  color: #17a2b8;
-  font-size: 16px;
+  color: var(--color-val-teal);
+  font-size: 15px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-weight: 700;
+}
+
+.valueTeal span {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
 }
 
 @media (max-width: 1100px) {
   .stageCard {
-    height: auto;
-    min-height: 300px;
+    min-height: 280px;
   }
 }

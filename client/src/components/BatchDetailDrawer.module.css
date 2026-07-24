@@ -4,7 +4,8 @@
   z-index: 50;
   display: flex;
   justify-content: flex-end;
-  background: rgba(15, 23, 42, .42);
+  background: var(--color-backdrop);
+  backdrop-filter: blur(4px);
   animation: fadeIn .2s ease-out;
 }
 
@@ -13,8 +14,9 @@
   width: 75vw;
   height: 100%;
   overflow-y: auto;
-  background: #fff;
-  box-shadow: -16px 0 36px rgba(15, 23, 42, .2);
+  background: var(--color-surface);
+  border-left: 1px solid var(--color-border);
+  box-shadow: -16px 0 36px rgba(0, 0, 0, .4);
   animation: slideIn .28s cubic-bezier(.22, .8, .24, 1);
 }
 
@@ -28,18 +30,19 @@
   height: 36px;
   align-items: center;
   justify-content: center;
-  border: 1px solid #d8e2ed;
+  border: 1px solid var(--color-border);
   border-radius: 8px;
-  background: #fff;
-  color: #425466;
+  background: var(--color-surface-raised);
+  color: var(--color-text-secondary);
   cursor: pointer;
-  box-shadow: 0 3px 10px rgba(31, 56, 85, .1);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, .2);
+  transition: all 0.15s ease;
 }
 
 .closeButton:hover {
-  background: #eef6ff;
-  border-color: #2196f3;
-  color: #146fbd;
+  background: var(--color-surface-overlay);
+  border-color: var(--color-border-active);
+  color: var(--color-text-heading);
 }
 
 @keyframes fadeIn {

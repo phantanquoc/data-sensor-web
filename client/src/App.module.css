@@ -1,9 +1,22 @@
+.page {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+}
+
 .content {
-  background-color: white;
-  padding: 8px 24px 24px;
-  border-radius: 15px;
-  margin-top: 10px;
-  margin-bottom: 10px;
+  background: var(--color-surface);
+  padding: 12px 24px 24px;
+  border-radius: 16px;
+  border: 1px solid var(--color-border);
+  margin-bottom: 12px;
+  box-shadow: var(--shadow-card);
+  transition: background-color 0.2s ease;
 }
 
 .tabContent {
@@ -15,11 +28,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: 0 0 12px;
-  color: #2c3e50;
-  font-size: 28px;
-  font-weight: bold;
+  margin: 0 0 16px;
+  color: var(--color-text-primary);
+  font-size: 24px;
+  font-weight: 700;
   text-align: center;
+  letter-spacing: -0.02em;
 }
 
 .timeDisplay {
@@ -31,8 +45,8 @@
 .detailCardsRow {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 2fr);
-  align-items: start;
-  gap: 16px;
+  align-items: stretch;
+  gap: 14px;
 }
 
 @media (max-width: 1100px) {
@@ -41,17 +55,23 @@
   }
 }
 
+@media (max-width: 900px) {
+  .page {
+    flex-direction: column;
+  }
+}
+
 @media (max-width: 640px) {
   .content {
-    padding: 10px 16px 16px;
+    padding: 12px 16px 16px;
   }
 
   .heading {
     align-items: center;
     flex-direction: column;
     gap: 8px;
-    margin-bottom: 10px;
-    font-size: 24px;
+    margin-bottom: 12px;
+    font-size: 20px;
   }
 
   .timeDisplay {

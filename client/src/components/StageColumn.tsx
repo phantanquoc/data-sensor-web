@@ -81,10 +81,12 @@ export const StageColumn: React.FC<StageColumnProps> = ({
       )}
       {isStage4(stage.set_giai_doan) && (
         <>
-          <div className={styles.row}>
+          <div className={styles.rowLast}>
             <span className={styles.rowLabel}>Thời gian treo lòng</span>
             <b className={styles.valueBlue}>{stage.set_giai_doan.thoi_gian_treo_long} <span>phút</span></b>
           </div>
+          {/* Đã ẩn theo yêu cầu: khối "nhúng lòng đầu" (nhung_long_dau).
+              Bỏ comment dưới đây để hiển thị lại 6 thông số này ở card Giai đoạn 4.
           {(() => {
             const nl = stage.set_giai_doan.nhung_long_dau;
             if (!nl) return null;
@@ -121,6 +123,7 @@ export const StageColumn: React.FC<StageColumnProps> = ({
               </>
             );
           })()}
+          */}
         </>
       )}
     </div>

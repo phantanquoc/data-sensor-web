@@ -16,14 +16,9 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // React SPA is the primary UI at `/`. Its static assets (hashed JS/CSS under
-// /assets, plus /js from pubic) are served first so they resolve at the root.
+// /assets) are served from the Vite build output so they resolve at the root.
 const SPA_DIR = path.join(__dirname, "client", "dist");
 app.use(express.static(SPA_DIR));            // React build (index.html, /assets/*)
-app.use(express.static(path.join(__dirname, "pubic"))); // /js/socket.io.js (dùng chung EJS)
-
-// EJS engine — legacy dashboard vẫn giữ để dự phòng, đặt dưới `/legacy`.
-app.set("view engine", "ejs");
-app.set("views", path.join(__dirname, "views"));
 
 app.post("/enable_machine", (req, res, next) => {
   console.log(req.body);
@@ -33,7 +28,7 @@ app.post("/enable_machine", (req, res, next) => {
   });
 });
 
-// API + legacy EJS view. router/home.js phục vụ `/legacy` (EJS) và các API get/sua/xoa.
+// REST API cho React SPA. router/home.js phục vụ các endpoint get/sua/xoa.
 const home = require("./router/home");
 app.use(home);
 
@@ -133,7 +128,7 @@ mongoose.connection.on("connected", () => {
   dbConnected = true;
   if (!orphanCleanupDone) {
     orphanCleanupDone = true;
-    cleanupOrphanBatches();
+    resumeOpenBatches();
   }
 });
 mongoose.connection.on("disconnected", () => {
@@ -152,25 +147,31 @@ connectMongo();
 // ======================
 const { plcConnections, connect, getStatus, updateStatus } = require("./connectPLC");
 const plcModels = require("./model/plc_schema");
-const { postDataPlc, getLatestStages } = require("./controller/post_data_plc");
+const { postDataPlc, getLatestStages, setBatchDocId, shouldResumeAsNewBatch } = require("./controller/post_data_plc");
 const { Buffer } = require("buffer");
 
-// Dọn mẻ mồ côi (mẻ chưa stop) khi khởi động lại hệ thống
-async function cleanupOrphanBatches() {
-  const cleanupAt = new Date();
+// Khi khởi động lại: KHÔNG đóng mẻ đang chạy. Trỏ lại id_document về mẻ mở
+// gần nhất của mỗi nồi và bật cờ resume để cycle sau ghi tiếp vào đúng mẻ đó.
+async function resumeOpenBatches() {
   for (let n = 1; n <= 8; n++) {
-    await plcModels[n].updateMany(
-      { thoi_gian_stop: "" },
-      {
-        $set: {
-          thoi_gian_stop: formatVietnamTimestamp(cleanupAt),
-          thoi_gian_stop_at: cleanupAt,
-          dong_ep_khoi_dong: true,
-        },
-      },
-    ).catch((err) => console.log(err));
+    try {
+      const open = await plcModels[n]
+        .find({ thoi_gian_stop: "" })
+        .sort({ thoi_gian_start_at: -1, _id: -1 })
+        .limit(1)
+        .lean();
+      if (open && open[0]) {
+        const doc = open[0];
+        setBatchDocId(n, doc._id);
+        isStart[n] = true;
+        Start[n] = 2;
+        resumePending[n] = true;
+        resumedTong[n] = Number(doc.tong_thoi_gian_chay) || 0;
+        console.log(`Nồi ${n}: nối lại mẻ đang mở ${doc._id}`);
+      }
+    } catch (err) { console.log(err); }
   }
-  console.log("Đã dọn mẻ mồ côi");
+  console.log("Đã nối lại mẻ đang mở (nếu có)");
 }
 
 // Shared register-list template — cloned per fryer so each fryer owns its reg.val state
@@ -301,6 +302,8 @@ const isReading = {};
 const prevConnected = {};
 const lastConfigRead = {}; // mốc thời gian (ms) lần cuối đọc block config
 const needConfigRead = {}; // cờ ép đọc config ở cycle tới (kết nối lại / sườn lên M120)
+const resumePending = {};  // guard D60-backwards cho cycle đầu tiên sau resume
+const resumedTong = {};    // tong_thoi_gian_chay lưu trên mẻ mở khi resume
 for (let n = 1; n <= 8; n++) {
   Start[n] = 0;
   isStart[n] = false;
@@ -309,6 +312,8 @@ for (let n = 1; n <= 8; n++) {
   prevConnected[n] = null;
   lastConfigRead[n] = 0;
   needConfigRead[n] = true; // đọc config ngay ở cycle đầu tiên
+  resumePending[n] = false;
+  resumedTong[n] = 0;
 }
 
 // Chu kỳ làm mới config định kỳ (phương án C): 60s
@@ -445,6 +450,18 @@ async function readAllRegisters(cfg) {
   const giai_doan_2 = cfg.values["M124"];
   const giai_doan_3 = cfg.values["M126"];
   const giai_doan_4 = cfg.values["M127"];
+
+  // Guard nối lại mẻ: nếu trong lúc server tắt máy đã stop mẻ cũ và bắt đầu mẻ MỚI
+  // (D60 tụt lùi so với tổng đã lưu) thì KHÔNG ghi tiếp vào mẻ cũ. Hạ cờ để logic
+  // sườn lên M120 (Start===1) tự đóng mẻ cũ và tạo doc mới như bình thường.
+  if (resumePending[n]) {
+    resumePending[n] = false;
+    const liveD60 = Number(cfg.values["D60"]) || 0;
+    if (shouldResumeAsNewBatch(liveD60, resumedTong[n])) {
+      Start[n] = 0;
+      isStart[n] = false;
+    }
+  }
 
   // start
   if (cfg.values["M120"] && typeof cfg.values["M120"] === "boolean") {

@@ -1,4 +1,4 @@
-import type { BatchListItem, BatchDocument } from '../types';
+import type { BatchListItem, BatchDocument, ThongKe } from '../types';
 
 interface BatchListFilters {
   from?: string;
@@ -19,6 +19,18 @@ export async function getNoiChien(n: number, filters: BatchListFilters = {}): Pr
   if (filters.from) params.set('from', filters.from);
   if (filters.to) params.set('to', filters.to);
   return readJson<BatchListItem[]>(await fetch(`/get_noi_chien?${params.toString()}`));
+}
+
+export async function getThongKe(
+  filters: BatchListFilters = {},
+  may?: number,
+): Promise<ThongKe> {
+  const params = new URLSearchParams();
+  if (filters.from) params.set('from', filters.from);
+  if (filters.to) params.set('to', filters.to);
+  if (may != null) params.set('may', String(may));
+  const qs = params.toString();
+  return readJson<ThongKe>(await fetch(`/thong_ke${qs ? `?${qs}` : ''}`));
 }
 
 export async function getNoiChienDetail(id: string, n: number): Promise<BatchDocument> {
