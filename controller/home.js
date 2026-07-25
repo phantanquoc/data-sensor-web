@@ -5,6 +5,9 @@ const { formatVietnamTimestamp, formatVietnamDateCode } = require("../utils/time
 const MIN_MACHINE = 1;
 const MAX_MACHINE = 8;
 
+// Mẻ chiên chân không tối đa ~4h thực tế. 8h là ngưỡng rộng rãi để phân biệt zombie.
+const MAX_BATCH_DURATION_MS = 8 * 60 * 60 * 1000;
+
 function getMachineNumber(req) {
   const n = Number.parseInt(req.query.so_noiChien, 10);
   return Number.isInteger(n) && n >= MIN_MACHINE && n <= MAX_MACHINE ? n : null;
@@ -66,8 +69,51 @@ function temporaryBatchCode(n, doc) {
  * error    = stopped AND tong_thoi_gian_chay < 85
  */
 function batchStatus(doc) {
-  if (!doc.thoi_gian_stop) return 'running';
+  if (!doc.thoi_gian_stop) {
+    // Zombie detection: if batch started > 8h ago and still no stop → treat as error
+    const startDate = getBatchDate(doc, 'thoi_gian_start_at', 'thoi_gian_start');
+    if (startDate && (Date.now() - startDate.getTime() > MAX_BATCH_DURATION_MS)) {
+      return 'error';
+    }
+    return 'running';
+  }
   return (Number(doc.tong_thoi_gian_chay) || 0) >= 85 ? 'completed' : 'error';
+}
+
+/**
+ * Đếm mẻ theo trạng thái trong khoảng [from, to].
+ *
+ * Mẻ ĐANG CHẠY luôn được tính bất kể ngày bắt đầu: một mẻ khởi động hôm qua
+ * và còn chạy sang hôm nay vẫn phải hiện ở kỳ "Ngày", nếu không dashboard báo 0
+ * trong khi máy đang chạy thật. Mẻ đã kết thúc mới lọc theo ngày bắt đầu.
+ *
+ * @param {Array<Array<object>>} perMachine - mảng docs theo từng máy
+ * @param {Date|null} from
+ * @param {Date|null} to
+ */
+function countBatchStats(perMachine, from, to) {
+  const stats = { tong: 0, hoan_thanh: 0, loi: 0, dang_chay: 0 };
+  for (const docs of perMachine) {
+    for (const doc of docs) {
+      const status = batchStatus(doc);
+
+      if (status !== 'running') {
+        const date = getBatchDate(doc, 'thoi_gian_start_at', 'thoi_gian_start');
+        if (from && (!date || date < from)) continue;
+        if (to && (!date || date > to)) continue;
+      }
+
+      stats.tong += 1;
+      if (status === 'running') {
+        stats.dang_chay += 1;
+      } else if (status === 'error') {
+        stats.loi += 1;
+      } else {
+        stats.hoan_thanh += 1;
+      }
+    }
+  }
+  return stats;
 }
 
 function toListItem(doc, n) {
@@ -103,24 +149,28 @@ exports.noi_chien = async (req, res) => {
   }
 
   try {
+    // Build Mongo query: date range filter + always include running batches
+    const conditions = [];
+    if (from || to) {
+      const rangeFilter = {};
+      if (from) rangeFilter.$gte = from;
+      if (to) rangeFilter.$lte = to;
+      conditions.push({ thoi_gian_start_at: rangeFilter });
+      // Running batches (no stop time) always included regardless of date
+      conditions.push({ thoi_gian_stop: "" });
+      // Legacy docs without thoi_gian_start_at field — include and let JS filter handle them
+      conditions.push({ thoi_gian_start_at: { $exists: false } });
+    }
+
+    const query = conditions.length > 0 ? { $or: conditions } : {};
+
     const docs = await plcModels[n]
-      .find()
+      .find(query)
       .select('ma_me_chien ghi_chu thoi_gian_start thoi_gian_stop thoi_gian_start_at thoi_gian_stop_at tong_thoi_gian_chay dong_ep_khoi_dong')
+      .sort({ thoi_gian_start_at: -1, _id: -1 })
       .lean();
 
-    const filtered = docs
-      .filter((doc) => {
-        const date = getBatchDate(doc, 'thoi_gian_start_at', 'thoi_gian_start');
-        if (from && (!date || date < from)) return false;
-        if (to && (!date || date > to)) return false;
-        return true;
-      })
-      .sort((a, b) => {
-        const aDate = getBatchDate(a, 'thoi_gian_start_at', 'thoi_gian_start')?.getTime() ?? 0;
-        const bDate = getBatchDate(b, 'thoi_gian_start_at', 'thoi_gian_start')?.getTime() ?? 0;
-        return bDate - aDate || String(b._id).localeCompare(String(a._id));
-      })
-      .map((doc) => toListItem(doc, n));
+    const filtered = docs.map((doc) => toListItem(doc, n));
 
     return res.json(filtered);
   } catch (err) {
@@ -149,34 +199,30 @@ exports.thong_ke = async (req, res) => {
   }
 
   try {
+    // Build Mongo query: date range + always include running batches
+    const conditions = [];
+    if (from || to) {
+      const rangeFilter = {};
+      if (from) rangeFilter.$gte = from;
+      if (to) rangeFilter.$lte = to;
+      conditions.push({ thoi_gian_start_at: rangeFilter });
+      conditions.push({ thoi_gian_stop: "" });
+      // Legacy docs without thoi_gian_start_at field — include and let JS filter handle them
+      conditions.push({ thoi_gian_start_at: { $exists: false } });
+    }
+
+    const query = conditions.length > 0 ? { $or: conditions } : {};
+
     const perMachine = await Promise.all(
       machineNums.map((n) =>
         plcModels[n]
-          .find()
+          .find(query)
           .select('thoi_gian_start thoi_gian_stop thoi_gian_start_at tong_thoi_gian_chay dong_ep_khoi_dong')
           .lean(),
       ),
     );
 
-    const stats = { tong: 0, hoan_thanh: 0, loi: 0, dang_chay: 0 };
-    for (const docs of perMachine) {
-      for (const doc of docs) {
-        const date = getBatchDate(doc, 'thoi_gian_start_at', 'thoi_gian_start');
-        if (from && (!date || date < from)) continue;
-        if (to && (!date || date > to)) continue;
-
-        stats.tong += 1;
-        const status = batchStatus(doc);
-        if (status === 'running') {
-          stats.dang_chay += 1;
-        } else if (status === 'error') {
-          stats.loi += 1;
-        } else {
-          stats.hoan_thanh += 1;
-        }
-      }
-    }
-
+    const stats = countBatchStats(perMachine, from, to);
     return res.json(stats);
   } catch (err) {
     console.error('thong_ke error:', err);
@@ -255,3 +301,34 @@ exports.xoa_noi_chien_detail = async (req, res) => {
 };
 
 exports.batchStatus = batchStatus;
+exports.countBatchStats = countBatchStats;
+
+/**
+ * Lightweight chart endpoint: returns only timestamp + temperature + pressure
+ * per stage for a single batch document. Reduces payload size for fleet chart.
+ */
+exports.get_noi_chien_chart = async (req, res) => {
+  const n = getMachineNumber(req);
+  const id = req.query.id;
+  if (!n) return res.status(400).json({ error: 'so_noiChien must be between 1 and 8' });
+  if (!validateObjectId(id)) return res.status(400).json({ error: 'id không hợp lệ' });
+
+  try {
+    const doc = await plcModels[n]
+      .findById(id)
+      .select('thoi_gian_start thoi_gian_start_at giai_doan_1.bien_du_lieu.thoi_gian giai_doan_1.bien_du_lieu.nhiet_do giai_doan_1.bien_du_lieu.ap_suat_chan_khong giai_doan_2.bien_du_lieu.thoi_gian giai_doan_2.bien_du_lieu.nhiet_do giai_doan_2.bien_du_lieu.ap_suat_chan_khong giai_doan_3.bien_du_lieu.thoi_gian giai_doan_3.bien_du_lieu.nhiet_do giai_doan_3.bien_du_lieu.ap_suat_chan_khong giai_doan_4.bien_du_lieu.thoi_gian giai_doan_4.bien_du_lieu.nhiet_do giai_doan_4.bien_du_lieu.ap_suat_chan_khong')
+      .lean();
+    if (!doc) return res.status(404).json({ error: 'Không tìm thấy mẻ chiên' });
+    return res.json({
+      thoi_gian_start: doc.thoi_gian_start,
+      thoi_gian_start_at: doc.thoi_gian_start_at,
+      giai_doan_1: { bien_du_lieu: doc.giai_doan_1?.bien_du_lieu ?? [] },
+      giai_doan_2: { bien_du_lieu: doc.giai_doan_2?.bien_du_lieu ?? [] },
+      giai_doan_3: { bien_du_lieu: doc.giai_doan_3?.bien_du_lieu ?? [] },
+      giai_doan_4: { bien_du_lieu: doc.giai_doan_4?.bien_du_lieu ?? [] },
+    });
+  } catch (err) {
+    console.error('get_noi_chien_chart error:', err);
+    return res.status(500).json({ error: 'Không thể tải dữ liệu biểu đồ' });
+  }
+};

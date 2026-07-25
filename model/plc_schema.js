@@ -14,11 +14,10 @@ const plcSchema = new Schema({
   },
   thoi_gian_start: {
     type: String,
-    require: true,
+    required: true,
   },
   thoi_gian_stop: {
     type: String,
-    require: true,
   },
   // Normalized timestamps for filtering/sorting; legacy string fields remain
   // the display/source-of-truth format for backward compatibility.
@@ -36,33 +35,33 @@ const plcSchema = new Schema({
   // D42
   tong_thoi_gian_chay: {
     type: Number,
-    require: true,
+    required: true,
   },
   giai_doan_1: {
     // D260
     thoi_gian_chay: {
       type: Number,
-      require: true,
+      required: true,
     },
     //D258
     so_lan_nhung: {
       type: Number,
-      require: true,
+      required: true,
     },
     //D256
     thoi_gian_nhung: {
       type: Number,
-      require: true,
+      required: true,
     },
     //D316
     thoi_gian_lap_lai: {
       type: Number,
-      require: true,
+      required: true,
     },
     //D500
     nhiet_do_cai_dat: {
       type: Number,
-      require: true,
+      required: true,
     },
     //D507
     vi_tri_dung: {
@@ -73,7 +72,7 @@ const plcSchema = new Schema({
       {
         thoi_gian: {
           type: String,
-          require: true,
+          required: true,
         },
         // D2
         ap_suat_vo_hoi: {
@@ -98,17 +97,17 @@ const plcSchema = new Schema({
         //D258
         so_lan_nhung: {
           type: Number,
-          require: true,
+          required: true,
         },
         //D256
         thoi_gian_nhung: {
           type: Number,
-          require: true,
+          required: true,
         },
         //D316
         thoi_gian_lap_lai: {
           type: Number,
-          require: true,
+          required: true,
         },
         // D500
         nhiet_do_cai_dat: {
@@ -157,27 +156,27 @@ const plcSchema = new Schema({
     //D202
     thoi_gian_chay: {
       type: Number,
-      require: true,
+      required: true,
     },
     //D262
     so_lan_nhung: {
       type: Number,
-      require: true,
+      required: true,
     },
     //D204
     thoi_gian_nhung: {
       type: Number,
-      require: true,
+      required: true,
     },
     //D264
     thoi_gian_lap_lai: {
       type: Number,
-      require: true,
+      required: true,
     },
     //D502
     nhiet_do_cai_dat: {
       type: Number,
-      require: true,
+      required: true,
     },
     //D508
     vi_tri_dung: {
@@ -188,7 +187,7 @@ const plcSchema = new Schema({
       {
         thoi_gian: {
           type: String,
-          require: true,
+          required: true,
         },
         // D2
         ap_suat_vo_hoi: {
@@ -213,17 +212,17 @@ const plcSchema = new Schema({
         //D262
         so_lan_nhung: {
           type: Number,
-          require: true,
+          required: true,
         },
         //D204
         thoi_gian_nhung: {
           type: Number,
-          require: true,
+          required: true,
         },
         //D264
         thoi_gian_lap_lai: {
           type: Number,
-          require: true,
+          required: true,
         },
         // D502
         nhiet_do_cai_dat: {
@@ -272,27 +271,27 @@ const plcSchema = new Schema({
     //D206
     thoi_gian_chay: {
       type: Number,
-      require: true,
+      required: true,
     },
     //D266
     so_lan_nhung: {
       type: Number,
-      require: true,
+      required: true,
     },
     //D208
     thoi_gian_nhung: {
       type: Number,
-      require: true,
+      required: true,
     },
     //D268
     thoi_gian_lap_lai: {
       type: Number,
-      require: true,
+      required: true,
     },
     //D504
     nhiet_do_cai_dat: {
       type: Number,
-      require: true,
+      required: true,
     },
     //D509
     vi_tri_dung: {
@@ -303,7 +302,7 @@ const plcSchema = new Schema({
       {
         thoi_gian: {
           type: String,
-          require: true,
+          required: true,
         },
         // D2
         ap_suat_vo_hoi: {
@@ -328,22 +327,22 @@ const plcSchema = new Schema({
         //D266
         so_lan_nhung: {
           type: Number,
-          require: true,
+          required: true,
         },
         //D208
         thoi_gian_nhung: {
           type: Number,
-          require: true,
+          required: true,
         },
         //D268
         thoi_gian_lap_lai: {
           type: Number,
-          require: true,
+          required: true,
         },
         //D504
         nhiet_do_cai_dat: {
           type: Number,
-          require: true,
+          required: true,
         },
         //D509
         vi_tri_dung: {
@@ -393,7 +392,7 @@ const plcSchema = new Schema({
       {
         thoi_gian: {
           type: String,
-          require: true,
+          required: true,
         },
         // D2
         ap_suat_vo_hoi: {
@@ -518,6 +517,9 @@ const plcSchema = new Schema({
 
 // Index for fast lookup of open batches (thoi_gian_stop: "")
 plcSchema.index({ thoi_gian_stop: 1 });
+
+// Index for date-range queries and sorting by start time
+plcSchema.index({ thoi_gian_start_at: -1 });
 
 // Register and export all 8 models indexed by fryer number (1-based)
 // plcModels[1] = noi_chien_1, plcModels[2] = noi_chien_2, ..., plcModels[8] = noi_chien_8

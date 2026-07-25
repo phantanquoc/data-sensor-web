@@ -42,6 +42,27 @@ const giayVaoGd1 = {};
 const m1Prev = {};
 const hieuSuatKickRoot = {};
 const hieuSuatNhungHang = {};
+// Đếm số cycle đã chụp lại nhúng hàng (tránh ghi DB vô hạn nếu dòng điện không ổn định).
+// Sau MAX cycle → khóa snapshot dù dòng điện còn bất thường.
+const nhungHangRetries = {};
+const NHUNG_HANG_MAX_RETRIES = 20; // ~20 cycles ≈ 20-40s (cycle ~1-2s)
+
+// Retry kick_root dòng điện: thay setTimeout(2s) bằng retry mỗi cycle cho tới khi hợp lệ.
+const kickRootRetries = {};
+const kickRootLocked = {};
+const KICK_ROOT_MAX_RETRIES = 10; // ~10 cycles ≈ 8-16s
+
+// Dòng điện mới nhất mỗi cycle, per-fryer. Dùng để chụp TRỄ cho cột "Dòng điện"
+// của mốc kick_root (M1) & nhúng hàng (M155): tại sườn lên, motor vừa nhận lệnh →
+// thanh ghi PLC có thể chứa giá trị quá độ (vài nghìn A). Sau vài giây motor ổn định
+// → đọc lại giá trị này ghi đè vào snapshot.
+const dongDienRootMoiNhat = {};
+const dongDienVongNuocMoiNhat = {};
+
+// Ngưỡng hợp lệ: dòng điện > giá trị này coi là nhiễu quá độ (inrush/transient garbage).
+// Motor root ~5-12A, motor vòng nước ~10-25A → max thực tế < 50A.
+const DONG_DIEN_MAX_REASONABLE = 50;
+exports.DONG_DIEN_MAX_REASONABLE = DONG_DIEN_MAX_REASONABLE;
 
 function temporaryBatchCode(n, startedAt, id) {
   const datePart = formatVietnamDateCode(startedAt);
@@ -107,6 +128,8 @@ exports.postDataPlc = async (
   buf_575_576.writeUInt16LE(d575, 0);
   buf_575_576.writeUInt16LE(d576, 2);
   let d_575_576 = parseFloat(buf_575_576.readFloatLE(0).toFixed(2));
+  // Lưu dòng điện mới nhất mỗi cycle — dùng cho chụp trễ mốc kick_root & nhúng hàng.
+  dongDienRootMoiNhat[n] = d_575_576;
 
   let d571 = values && values["D571"] !== undefined ? values["D571"] : 0;
   let d572 = values && values["D572"] !== undefined ? values["D572"] : 0;
@@ -114,6 +137,7 @@ exports.postDataPlc = async (
   buf_571_572.writeUInt16LE(d571, 0);
   buf_571_572.writeUInt16LE(d572, 2);
   let d_571_572 = parseFloat(buf_571_572.readFloatLE(0).toFixed(2));
+  dongDienVongNuocMoiNhat[n] = d_571_572;
 
   // --- HIỆU SUẤT MÁY: đọc thẳng từ PLC (thay cho giá trị tính ở server) ---
   // Áp suất bắt đầu kick root: D216 (float LE = D216 low + D217 high)
@@ -225,26 +249,7 @@ exports.postDataPlc = async (
       thoi_gian_lap_lai: 0,
       nhiet_do_cai_dat: 0,
       vi_tri_dung: 0,
-      bien_du_lieu: [
-        {
-          thoi_gian: "",
-          ap_suat_vo_hoi: 0,
-          ap_suat_chan_khong: 0,
-          ap_suat_vong_nuoc: 0,
-          nhiet_do: 0,
-          so_lan_nhung: 0,
-          thoi_gian_nhung: 0,
-          thoi_gian_lap_lai: 0,
-          nhiet_do_cai_dat: 0,
-          vi_tri_dung: 0,
-          dong_dien_dong_co_root: 0,
-          dong_dien_dong_co_vong_nuoc: 0,
-          nhiet_do_vao_binh_sinh_han: 0,
-          nhiet_do_ra_binh_sinh_han: 0,
-          nhiet_do_vao_bom_vong_nuoc: 0,
-          nhiet_do_ra_bom_vong_nuoc: 0,
-        },
-      ],
+      bien_du_lieu: [],
     },
     giai_doan_2: {
       thoi_gian_chay: 0,
@@ -253,26 +258,7 @@ exports.postDataPlc = async (
       thoi_gian_lap_lai: 0,
       nhiet_do_cai_dat: 0,
       vi_tri_dung: 0,
-      bien_du_lieu: [
-        {
-          thoi_gian: "",
-          ap_suat_vo_hoi: 0,
-          ap_suat_chan_khong: 0,
-          ap_suat_vong_nuoc: 0,
-          nhiet_do: 0,
-          so_lan_nhung: 0,
-          thoi_gian_nhung: 0,
-          thoi_gian_lap_lai: 0,
-          nhiet_do_cai_dat: 0,
-          vi_tri_dung: 0,
-          dong_dien_dong_co_root: 0,
-          dong_dien_dong_co_vong_nuoc: 0,
-          nhiet_do_vao_binh_sinh_han: 0,
-          nhiet_do_ra_binh_sinh_han: 0,
-          nhiet_do_vao_bom_vong_nuoc: 0,
-          nhiet_do_ra_bom_vong_nuoc: 0,
-        },
-      ],
+      bien_du_lieu: [],
     },
     giai_doan_3: {
       thoi_gian_chay: 0,
@@ -281,45 +267,11 @@ exports.postDataPlc = async (
       thoi_gian_lap_lai: 0,
       nhiet_do_cai_dat: 0,
       vi_tri_dung: 0,
-      bien_du_lieu: [
-        {
-          thoi_gian: "",
-          ap_suat_vo_hoi: 0,
-          ap_suat_chan_khong: 0,
-          ap_suat_vong_nuoc: 0,
-          nhiet_do: 0,
-          so_lan_nhung: 0,
-          thoi_gian_nhung: 0,
-          thoi_gian_lap_lai: 0,
-          nhiet_do_cai_dat: 0,
-          vi_tri_dung: 0,
-          dong_dien_dong_co_root: 0,
-          dong_dien_dong_co_vong_nuoc: 0,
-          nhiet_do_vao_binh_sinh_han: 0,
-          nhiet_do_ra_binh_sinh_han: 0,
-          nhiet_do_vao_bom_vong_nuoc: 0,
-          nhiet_do_ra_bom_vong_nuoc: 0,
-          vi_tri_muc_dau: 0,
-        },
-      ],
+      bien_du_lieu: [],
     },
     giai_doan_4: {
-      thoi_gian_treo_long_gd_4: 0,
-      bien_du_lieu: [
-        {
-          thoi_gian: "",
-          ap_suat_vo_hoi: 0,
-          ap_suat_chan_khong: 0,
-          ap_suat_vong_nuoc: 0,
-          nhiet_do: 0,
-          dong_dien_dong_co_root: 0,
-          dong_dien_dong_co_vong_nuoc: 0,
-          nhiet_do_vao_binh_sinh_han: 0,
-          nhiet_do_ra_binh_sinh_han: 0,
-          nhiet_do_vao_bom_vong_nuoc: 0,
-          nhiet_do_ra_bom_vong_nuoc: 0,
-        },
-      ],
+      thoi_gian_treo_long: 0,
+      bien_du_lieu: [],
     },
   };
 
@@ -460,6 +412,31 @@ exports.postDataPlc = async (
   }
   m1Prev[n] = m1Now;
 
+  // Retry kick_root dòng điện: mỗi cycle kiểm tra lại cho tới khi giá trị hợp lệ hoặc hết retry.
+  if (Start > 1 && hieuSuatKickRoot[n] && !kickRootLocked[n] && id_document[n]) {
+    kickRootRetries[n] = (kickRootRetries[n] || 0) + 1;
+    const dongDienRoot = dongDienRootMoiNhat[n];
+    const dongDienVongNuoc = dongDienVongNuocMoiNhat[n];
+    const rootOk = Number.isFinite(dongDienRoot) && dongDienRoot > 0 && dongDienRoot <= DONG_DIEN_MAX_REASONABLE;
+    const vongNuocOk = Number.isFinite(dongDienVongNuoc) && dongDienVongNuoc > 0 && dongDienVongNuoc <= DONG_DIEN_MAX_REASONABLE;
+
+    if (rootOk && vongNuocOk) {
+      hieuSuatKickRoot[n].dong_dien_dong_co_root = dongDienRoot;
+      hieuSuatKickRoot[n].dong_dien_dong_co_vong_nuoc = dongDienVongNuoc;
+      model
+        .updateOne({ _id: id_document[n] }, { $set: {
+          "hieu_suat_may.kick_root.dong_dien_dong_co_root": dongDienRoot,
+          "hieu_suat_may.kick_root.dong_dien_dong_co_vong_nuoc": dongDienVongNuoc,
+        }})
+        .catch((err) => console.log(err));
+      kickRootLocked[n] = true;
+      dbg("nồi chiên " + n + " cập nhật dòng điện (kick_root) cycle " + kickRootRetries[n] + ": root=" + dongDienRoot + " vòng nước=" + dongDienVongNuoc);
+    } else if (kickRootRetries[n] >= KICK_ROOT_MAX_RETRIES) {
+      kickRootLocked[n] = true;
+      dbg("nồi chiên " + n + " kick_root dòng điện: hết retry (" + KICK_ROOT_MAX_RETRIES + " cycles), giữ giá trị hiện tại");
+    }
+  }
+
   // --- M155 (vào Giai đoạn 1) rising edge → ghi số giây từ M120 start → vào GĐ1 + chụp hiệu suất (1 lần/mẻ) ---
   const m155Now = giai_doan_1 === true;
   if (Start > 1 && m155Now && !m155Prev[n] && giayVaoGd1[n] == null && batchStartMs[n] != null) {
@@ -468,10 +445,16 @@ exports.postDataPlc = async (
   // Chụp hiệu suất nhúng hàng. PLC latch D672 (áp suất), D674/D676 (thời gian) tại sườn lên
   // M155 nhưng có thể trễ vài chu kỳ scan → tại đúng cycle bắt sườn lên, D672 còn 0.
   // Vì PLC GIỮ ba giá trị này suốt Giai đoạn 1 (chỉ reset khi sang GĐ2), ta chụp lại mỗi
-  // cycle khi M155 còn on cho tới khi áp suất khác 0 thì KHÓA (đọc thẳng từ PLC, gửi lên).
-  const nhungHangLocked =
-    hieuSuatNhungHang[n] != null && Number(hieuSuatNhungHang[n].ap_suat_chan_khong) !== 0;
+  // cycle khi M155 còn on cho tới khi áp suất khác 0 VÀ dòng điện hợp lệ thì KHÓA.
+  // Fallback: sau NHUNG_HANG_MAX_RETRIES cycle → khóa dù dòng điện chưa hợp lệ.
+  const nhHasAp = hieuSuatNhungHang[n] != null && Number(hieuSuatNhungHang[n].ap_suat_chan_khong) !== 0;
+  const nhDongDienOk = hieuSuatNhungHang[n] != null &&
+    hieuSuatNhungHang[n].dong_dien_dong_co_root <= DONG_DIEN_MAX_REASONABLE &&
+    hieuSuatNhungHang[n].dong_dien_dong_co_vong_nuoc <= DONG_DIEN_MAX_REASONABLE;
+  const nhExhausted = (nhungHangRetries[n] || 0) >= NHUNG_HANG_MAX_RETRIES;
+  const nhungHangLocked = nhHasAp && (nhDongDienOk || nhExhausted);
   if (Start > 1 && m155Now && !nhungHangLocked && id_document[n]) {
+    nhungHangRetries[n] = (nhungHangRetries[n] || 0) + 1;
     // Thời gian = M1→M155 (D676 phút + D674 giây), áp suất = D672 float. Đọc thẳng từ PLC.
     const snap = {
       ...buildPerfSnapshot(new Date()),
@@ -486,7 +469,9 @@ exports.postDataPlc = async (
       "nồi chiên " + n + " chụp hiệu suất nhúng hàng (M155)" +
         (Number(d_672_673) === 0
           ? " — áp suất=0, đọc lại cycle sau"
-          : " — đã chốt áp suất " + d_672_673),
+          : snap.dong_dien_dong_co_root > DONG_DIEN_MAX_REASONABLE || snap.dong_dien_dong_co_vong_nuoc > DONG_DIEN_MAX_REASONABLE
+            ? " — dòng điện quá độ (" + snap.dong_dien_dong_co_root + "/" + snap.dong_dien_dong_co_vong_nuoc + "), đọc lại cycle sau"
+            : " — đã chốt áp suất " + d_672_673),
     );
   }
   m155Prev[n] = m155Now;
@@ -626,6 +611,9 @@ exports.postDataPlc = async (
       m1Prev[n] = false;
       hieuSuatKickRoot[n] = null;
       hieuSuatNhungHang[n] = null;
+      nhungHangRetries[n] = 0;
+      kickRootRetries[n] = 0;
+      kickRootLocked[n] = false;
       // Mốc bắt đầu mẻ để tính số giây từ M120 start → M6 on lần đầu
       batchStartMs[n] = batchStartedAt.getTime();
     }
@@ -727,6 +715,7 @@ exports.postDataPlc = async (
 
   // update stop — flush final values + set thoi_gian_stop
   if (Start === 0) {
+    if (!id_document[n]) return;
     const batchStoppedAt = new Date();
     await model.updateOne(
       { _id: id_document[n] },
@@ -759,7 +748,7 @@ exports.postDataPlc = async (
     ).catch((err) => console.log(err));
     console.log("nồi chiên " + n + " đã stop mẻ");
     io_.to("noi_" + n).emit("noi_chien_" + n + "_stop", {
-      stop: "đã hoang thành xong mẽ chiên",
+      stop: "đã hoàn thành xong mẻ chiên",
     });
   }
 
@@ -784,6 +773,13 @@ exports.getLatestStages = (n) => {
  */
 exports.setBatchDocId = function setBatchDocId(n, id) {
   id_document[n] = id;
+};
+
+/**
+ * Restore in-memory batch start timestamp so giay_tu_start is correct after resume.
+ */
+exports.setBatchStartMs = function setBatchStartMs(n, ms) {
+  batchStartMs[n] = ms;
 };
 
 /**

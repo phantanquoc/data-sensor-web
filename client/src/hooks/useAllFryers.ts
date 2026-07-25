@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { io, Socket } from 'socket.io-client';
+import { subscribe, unsubscribe, getSocket } from './sharedSockets';
 import type {
   StagePayload,
   NoiChienDataPayload,
@@ -15,10 +15,10 @@ export interface FryerStatus {
   running: boolean;        // a batch is active (stage_elapsed_ms !== null)
   stage: number | null;    // current active stage (1..4) or null
   elapsedMs: number;       // active-stage elapsed (server-authoritative)
-  receivedAt: number;      // local time the elapsed measurement is anchored to (now − age)
+  receivedAt: number;      // local time the elapsed measurement is anchored to (now - age)
   targetMin: number;       // active-stage target minutes
   targetTemperature: number | null; // active-stage temperature setpoint (stages 1..3)
-  tongThoiGian: number;    // total run time (phút)
+  tongThoiGian: number;    // total run time (phut)
   sensor: SensorData | null;
 }
 
@@ -53,20 +53,16 @@ function targetTemperatureOf(stage: StagePayload, stageNum: number): number | nu
 }
 
 /**
- * Opens one socket connection per fryer (the server rooms a socket to a single
- * fryer at a time), joins its room, and derives running/idle + current stage +
- * elapsed for the overview. Mount-scoped: all 8 connections close on unmount.
+ * Uses the shared socket manager (one socket per fryer, shared across hooks)
+ * to derive running/idle + current stage + elapsed for the overview.
  */
 export function useAllFryers(): FryerStatus[] {
   const [statuses, setStatuses] = useState<FryerStatus[]>(initStatuses);
 
   useEffect(() => {
-    const sockets: Socket[] = [];
+    const keys: Array<{ n: number; key: symbol }> = [];
 
     for (let n = 1; n <= 8; n++) {
-      const socket = io({ forceNew: true });
-      sockets.push(socket);
-
       const patch = (upd: Partial<FryerStatus>) => {
         setStatuses((prev) => {
           const next = [...prev];
@@ -75,11 +71,9 @@ export function useAllFryers(): FryerStatus[] {
         });
       };
 
-      socket.on('connect', () => {
-        patch({ connected: true });
-        socket.emit('join_noi', String(n));
-      });
-      socket.on('disconnect', () => patch({ connected: false }));
+      // Set initial connected state from actual socket
+      const sock = getSocket(n);
+      patch({ connected: sock?.connected ?? false });
 
       const onData = (payload: StagePayload[] | NoiChienDataPayload) => {
         let stages: StagePayload[];
@@ -105,8 +99,6 @@ export function useAllFryers(): FryerStatus[] {
           running,
           stage: stageNum,
           elapsedMs: elapsedMs ?? 0,
-          // Anchor to when the server measured it, so a stale join-snapshot
-          // isn't interpolated as if it just arrived.
           receivedAt: Date.now() - ageMs,
           targetMin: activeStage && stageNum ? targetOf(activeStage, stageNum) : 0,
           targetTemperature: activeStage && stageNum
@@ -127,12 +119,19 @@ export function useAllFryers(): FryerStatus[] {
         });
       };
 
-      socket.on(`noi_chien_${n}_data`, onData as (...args: unknown[]) => void);
-      socket.on(`noi_chien_${n}_stop`, onStop);
+      const key = subscribe(n, [
+        ['connect', (() => patch({ connected: true })) as (...args: unknown[]) => void],
+        ['disconnect', (() => patch({ connected: false })) as (...args: unknown[]) => void],
+        [`noi_chien_${n}_data`, onData as (...args: unknown[]) => void],
+        [`noi_chien_${n}_stop`, onStop as (...args: unknown[]) => void],
+      ]);
+      keys.push({ n, key });
     }
 
     return () => {
-      for (const s of sockets) s.disconnect();
+      for (const { n, key } of keys) {
+        unsubscribe(n, key);
+      }
     };
   }, []);
 
