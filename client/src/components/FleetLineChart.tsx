@@ -164,7 +164,12 @@ export const FleetLineChart: React.FC<FleetLineChartProps> = ({
   const { merged, xMax, presentMachines, yScale } = useMemo(() => {
     const emptyScale = { domain: [0, 1] as [number, number], ticks: [0, 1] };
     if (activeSeries.length === 0) {
-      return { merged: [], xMax: 0, presentMachines: [] as { n: number; color: string }[], yScale: emptyScale };
+      return {
+        merged: [],
+        xMax: 0,
+        presentMachines: [] as Array<{ n: number; color: string; pointCount: number }>,
+        yScale: emptyScale,
+      };
     }
 
     const { rows, xMax: max, vMin, vMax, machines } = buildMerged(activeSeries);
@@ -246,7 +251,9 @@ export const FleetLineChart: React.FC<FleetLineChartProps> = ({
               dataKey={`m${s.n}`}
               stroke={s.color}
               strokeWidth={2}
-              dot={false}
+              // Mẻ vừa bắt đầu chỉ có 1 điểm: không tạo được đoạn thẳng nên
+              // tắt dot là hoàn toàn vô hình. Hiện dot cho tới khi có 2 điểm.
+              dot={s.pointCount < 2 ? { r: 3 } : false}
               activeDot={{ r: 4 }}
               isAnimationActive={false}
               type="monotone"

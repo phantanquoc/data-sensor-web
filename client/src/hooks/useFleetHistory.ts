@@ -18,7 +18,7 @@ import { useEffect, useRef, useState } from 'react';
 import { subscribe, unsubscribe } from './sharedSockets';
 import { getNoiChien, getNoiChienDetail } from '../api';
 import { parseTs } from './timeUtils';
-import { decideRotation } from './batchRotation';
+import { decideRotation, REANCHOR_TOL_MS } from './batchRotation';
 import type {
   StagePayload,
   NoiChienDataPayload,
@@ -67,6 +67,14 @@ export const FRYER_CHART_COLORS: Record<number, string> = {
 
 const MAX_POINTS = 300;
 const MIN_PHUT_GAP = 0.4; // ~24 seconds minimum gap between live appended points
+
+/**
+ * Nạp lại mẻ mới: backend chỉ $push 1 điểm mỗi 5 cycle, nên điểm gd1 đầu tiên
+ * xuất hiện muộn — đo trên 23 mẻ gần nhất: min 3s, trung vị 49s, max 129s.
+ * Cửa sổ 8 lượt × 20s = 0..160s phủ hết khoảng đó.
+ */
+const REFETCH_ATTEMPTS = 8;
+const REFETCH_DELAY_MS = 20_000;
 
 function capPoints(points: ChartPoint[]): ChartPoint[] {
   if (points.length <= MAX_POINTS) return points;
@@ -270,6 +278,60 @@ export function useFleetHistory(): FleetHistoryState {
   useEffect(() => {
     const subKeys: Array<{ n: number; key: symbol }> = [];
     let cancelled = false;
+    /** Máy đang có một lượt nạp lại mẻ mới đang bay → không gọi thêm. */
+    const refetching: Record<number, boolean> = {};
+
+    /**
+     * Nạp lại mẻ đang chạy của MỘT máy sau khi nó sang mẻ mới.
+     *
+     * Backend đã ghi sẵn các điểm đầu mẻ, nên đọc lại cho ra đường liền ngay
+     * thay vì chờ tick live tích đủ. Bỏ kết quả nếu trong lúc request bay máy
+     * lại sang mẻ khác nữa (revision đổi) — lúc đó payload đã lỗi thời.
+     */
+    const refetchLatest = async (n: number, expectedMark: number) => {
+      if (refetching[n]) return;
+      refetching[n] = true;
+      const revAtLoad = revisionRef.current[n] ?? 0;
+      try {
+        // Backend phát socket TRƯỚC khi tạo document mẻ mới, nên lần đọc đầu có
+        // thể còn thấy mẻ cũ. Thử vài lượt cách nhau, nhận lượt nào trả về mẻ
+        // có mốc khớp mốc đang vẽ.
+        for (let attempt = 0; attempt < REFETCH_ATTEMPTS; attempt++) {
+          if (attempt > 0) {
+            await new Promise((r) => setTimeout(r, REFETCH_DELAY_MS));
+          }
+          if (cancelled) return;
+          // Máy lại sang mẻ khác nữa → lượt nạp này đã lỗi thời.
+          if ((revisionRef.current[n] ?? 0) !== revAtLoad) return;
+
+          const res = await loadBatchHistoryDual(n);
+          if (cancelled) return;
+          if ((revisionRef.current[n] ?? 0) !== revAtLoad) return;
+          if (!res.latest) continue;
+
+          const { doc, batchStartMs, lastStage } = res.latest;
+          // Mốc phải khớp mẻ đang vẽ, nếu không đây vẫn là mẻ cũ.
+          if (Math.abs(batchStartMs - expectedMark) > REANCHOR_TOL_MS) continue;
+
+          const built = buildBatchPoints(doc, batchStartMs);
+          // Chỉ nhận khi REST cho nhiều điểm hơn tick live đã tích được, để
+          // không làm mất điểm mới hơn mà REST chưa kịp thấy. Chưa đủ thì thử
+          // lượt sau, vì backend còn đang ghi dần điểm đầu mẻ.
+          if (built.tPts.length <= (latestTempPtsRef.current[n]?.length ?? 0)) continue;
+
+          latestBatchStartRef.current[n] = batchStartMs;
+          lastStageRef.current[n] = lastStage;
+          latestTempPtsRef.current[n] = built.tPts;
+          latestApPtsRef.current[n] = built.aPts;
+          pushState();
+          return;
+        }
+      } catch {
+        // Nạp lại thất bại thì tick live vẫn tự tích điểm như trước.
+      } finally {
+        refetching[n] = false;
+      }
+    };
 
     // Initial batch load for all 8 machines (parallel)
     const loadAll = async () => {
@@ -390,6 +452,13 @@ export function useFleetHistory(): FleetHistoryState {
           latestRunningRef.current[machineN] = true;
           latestTempPtsRef.current[machineN] = [];
           latestApPtsRef.current[machineN] = [];
+
+          // Nạp lại mẻ mới từ REST. Nếu chỉ tích bằng tick live thì với
+          // MIN_PHUT_GAP=0.4 phải mất ~48 giây mới đủ 2 điểm để vẽ được một
+          // đoạn đường — 8 máy sang mẻ mới lệch nhau vài phút sẽ làm các đường
+          // biến mất lần lượt. Backend đã ghi sẵn điểm của mẻ mới, đọc lại là
+          // đường liền ngay.
+          void refetchLatest(machineN, latestBatchStartRef.current[machineN]);
         }
 
         if (!latestRunningRef.current[machineN]) return;

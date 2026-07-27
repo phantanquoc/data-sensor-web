@@ -84,12 +84,14 @@ export interface MergedResult {
   xMax: number;
   vMin: number;
   vMax: number;
-  machines: Array<{ n: number; color: string }>;
+  /** pointCount để component quyết định có vẽ dot hay không — chuỗi 1 điểm
+   *  không tạo được đoạn thẳng nên nếu tắt dot thì hoàn toàn vô hình. */
+  machines: Array<{ n: number; color: string; pointCount: number }>;
 }
 
 /** Dựng toàn bộ dữ liệu chart từ các series đang hiển thị. */
 export function buildMerged(series: SeriesInput[]): MergedResult {
-  const machines = series.map((s) => ({ n: s.n, color: s.color }));
+  const machines = series.map((s) => ({ n: s.n, color: s.color, pointCount: s.points.length }));
   const withPoints = series.filter((s) => s.points.length > 0);
 
   let xMax = 0;
