@@ -8,6 +8,9 @@ const MAX_MACHINE = 8;
 // Mẻ chiên chân không tối đa ~4h thực tế. 8h là ngưỡng rộng rãi để phân biệt zombie.
 const MAX_BATCH_DURATION_MS = 8 * 60 * 60 * 1000;
 
+// Số phút tối thiểu để một mẻ đã dừng được coi là hoàn thành.
+const MIN_COMPLETED_MINUTES = 80;
+
 function getMachineNumber(req) {
   const n = Number.parseInt(req.query.so_noiChien, 10);
   return Number.isInteger(n) && n >= MIN_MACHINE && n <= MAX_MACHINE ? n : null;
@@ -65,8 +68,8 @@ function temporaryBatchCode(n, doc) {
 /**
  * Compute batch status from document fields (read-time, not stored).
  * running  = batch has no stop time yet
- * completed = stopped AND tong_thoi_gian_chay >= 85
- * error    = stopped AND tong_thoi_gian_chay < 85
+ * completed = stopped AND tong_thoi_gian_chay >= MIN_COMPLETED_MINUTES
+ * error    = stopped AND tong_thoi_gian_chay < MIN_COMPLETED_MINUTES
  */
 function batchStatus(doc) {
   if (!doc.thoi_gian_stop) {
@@ -77,7 +80,7 @@ function batchStatus(doc) {
     }
     return 'running';
   }
-  return (Number(doc.tong_thoi_gian_chay) || 0) >= 85 ? 'completed' : 'error';
+  return (Number(doc.tong_thoi_gian_chay) || 0) >= MIN_COMPLETED_MINUTES ? 'completed' : 'error';
 }
 
 /**
@@ -302,6 +305,7 @@ exports.xoa_noi_chien_detail = async (req, res) => {
 
 exports.batchStatus = batchStatus;
 exports.countBatchStats = countBatchStats;
+exports.MIN_COMPLETED_MINUTES = MIN_COMPLETED_MINUTES;
 
 /**
  * Lightweight chart endpoint: returns only timestamp + temperature + pressure

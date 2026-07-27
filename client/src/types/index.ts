@@ -66,8 +66,8 @@ export interface NoiChienDataPayload {
 /** Aggregate stats across all 8 fryers (GET /thong_ke) */
 export interface ThongKe {
   tong: number;        // tổng số mẻ trong kỳ
-  hoan_thanh: number;  // đã dừng & tong_thoi_gian_chay >= 85
-  loi: number;         // mẻ lỗi: đã dừng & tong_thoi_gian_chay < 85
+  hoan_thanh: number;  // đã dừng & tong_thoi_gian_chay >= 80
+  loi: number;         // mẻ lỗi: đã dừng & tong_thoi_gian_chay < 80
   dang_chay: number;   // chưa dừng
 }
 

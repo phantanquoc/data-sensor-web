@@ -43,7 +43,7 @@ function runningLegacy(start) {
   return { thoi_gian_start: start, thoi_gian_stop: "" };
 }
 
-/** Mẻ đã xong (>=85 phút) bắt đầu lúc `start`. */
+/** Mẻ đã xong (>=80 phút) bắt đầu lúc `start`. */
 function completed(start) {
   return {
     thoi_gian_start: start,
@@ -52,7 +52,7 @@ function completed(start) {
   };
 }
 
-/** Mẻ lỗi (<85 phút) bắt đầu lúc `start`. */
+/** Mẻ lỗi (<80 phút) bắt đầu lúc `start`. */
 function errored(start) {
   return {
     thoi_gian_start: start,
