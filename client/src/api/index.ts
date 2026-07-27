@@ -54,3 +54,15 @@ export async function xoaNoiChienDetail(id: string, n: number): Promise<{ succes
     method: 'DELETE',
   }));
 }
+
+/** Lightweight chart projection — only timestamps + temperature + pressure per stage */
+export async function getNoiChienChart(id: string, n: number): Promise<{
+  thoi_gian_start?: string;
+  thoi_gian_start_at?: string;
+  giai_doan_1?: { bien_du_lieu?: Array<{ thoi_gian?: string; nhiet_do?: number; ap_suat_chan_khong?: number }> };
+  giai_doan_2?: { bien_du_lieu?: Array<{ thoi_gian?: string; nhiet_do?: number; ap_suat_chan_khong?: number }> };
+  giai_doan_3?: { bien_du_lieu?: Array<{ thoi_gian?: string; nhiet_do?: number; ap_suat_chan_khong?: number }> };
+  giai_doan_4?: { bien_du_lieu?: Array<{ thoi_gian?: string; nhiet_do?: number; ap_suat_chan_khong?: number }> };
+}> {
+  return readJson(await fetch(`/get_noi_chien_chart?id=${encodeURIComponent(id)}&so_noiChien=${n}`));
+}

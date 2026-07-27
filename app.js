@@ -147,7 +147,7 @@ connectMongo();
 // ======================
 const { plcConnections, connect, getStatus, updateStatus } = require("./connectPLC");
 const plcModels = require("./model/plc_schema");
-const { postDataPlc, getLatestStages, setBatchDocId, shouldResumeAsNewBatch } = require("./controller/post_data_plc");
+const { postDataPlc, getLatestStages, setBatchDocId, setBatchStartMs, shouldResumeAsNewBatch } = require("./controller/post_data_plc");
 const { Buffer } = require("buffer");
 
 // Khi khởi động lại: KHÔNG đóng mẻ đang chạy. Trỏ lại id_document về mẻ mở
@@ -163,6 +163,13 @@ async function resumeOpenBatches() {
       if (open && open[0]) {
         const doc = open[0];
         setBatchDocId(n, doc._id);
+        // Restore batchStartMs so giay_tu_start is correct for subsequent snapshots
+        const startMs = doc.thoi_gian_start_at
+          ? new Date(doc.thoi_gian_start_at).getTime()
+          : null;
+        if (startMs && !Number.isNaN(startMs)) {
+          setBatchStartMs(n, startMs);
+        }
         isStart[n] = true;
         Start[n] = 2;
         resumePending[n] = true;
@@ -367,17 +374,8 @@ async function readHoldingBlocks(cfg, blocks) {
         }
       }
     } catch (err) {
-      for (const reg of cfg.registerList) {
-        if (reg.dataType === "reg" && reg.modbusAddr >= start && reg.modbusAddr < start + count) {
-          try {
-            const response = await conn.readHoldingRegisters(reg.modbusAddr, 1);
-            reg.val = response.data[0];
-          } catch (err2) {
-            reg.val = 0;
-            updateStatus(n, false);
-          }
-        }
-      }
+      console.warn(`PLC${n} holdingBlock [${start},${count}] read failed: ${err.message} — keeping stale values`);
+      // Keep reg.val unchanged (stale value for one cycle is acceptable)
     }
   }
 }
@@ -395,17 +393,8 @@ async function readCoilBlocks(cfg, blocks) {
         }
       }
     } catch (err) {
-      for (const reg of cfg.registerList) {
-        if (reg.dataType === "coil" && reg.modbusAddr >= start && reg.modbusAddr < start + count) {
-          try {
-            const response = await conn.readCoils(reg.modbusAddr, 1);
-            reg.val = response.data[0];
-          } catch (err2) {
-            reg.val = 0;
-            updateStatus(n, false);
-          }
-        }
-      }
+      console.warn(`PLC${n} coilBlock [${start},${count}] read failed: ${err.message} — keeping stale values`);
+      // Keep reg.val unchanged (stale value for one cycle is acceptable)
     }
   }
 }

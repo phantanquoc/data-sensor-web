@@ -4,7 +4,8 @@
  * FleetLineChart component on the Overview page.
  *
  * Design decisions:
- *  - Opens 8 socket connections using the same forceNew pattern as useAllFryers.
+ *  - Uses shared socket manager instead of opening its own 8 connections.
+ *  - Uses /get_noi_chien_chart endpoint for initial REST load (lighter payload).
  *  - Capped at MAX_POINTS per machine with even downsampling.
  *  - Live points appended only when MIN_PHUT_GAP elapsed since last point.
  *  - X values use only backend-generated timestamps.
@@ -14,7 +15,7 @@
  *    Overview can toggle between the current and the preceding batch.
  */
 import { useEffect, useRef, useState } from 'react';
-import { io, Socket } from 'socket.io-client';
+import { subscribe, unsubscribe } from './sharedSockets';
 import { getNoiChien, getNoiChienDetail } from '../api';
 import { parseTs } from './timeUtils';
 import type {
@@ -219,17 +220,13 @@ export function useFleetHistory(): FleetHistoryState {
   const latestBatchStartRef = useRef<Record<number, number>>({});
   const latestRunningRef = useRef<Record<number, boolean>>({});
   const lastStageRef = useRef<Record<number, 1 | 2 | 3 | 4 | null>>({});
-  // Last server-computed stage_elapsed_ms per machine (fallback signal only).
   const lastElapsedRef = useRef<Record<number, number | null>>({});
-  // Whether at least one live socket tick has been processed since REST load.
-  // Used to distinguish "REST loaded a stale batch" (first tick) from a genuine
-  // batch transition observed live (later ticks).
   const seenLiveTickRef = useRef<Record<number, boolean>>({});
   const revisionRef = useRef<Record<number, number>>({});
   const latestTempPtsRef = useRef<Record<number, ChartPoint[]>>({});
   const latestApPtsRef = useRef<Record<number, ChartPoint[]>>({});
 
-  // --- Per-machine refs (previous batch — frozen after load or promotion) ---
+  // --- Per-machine refs (previous batch) ---
   const prevBatchStartRef = useRef<Record<number, number>>({});
   const prevTempPtsRef = useRef<Record<number, ChartPoint[]>>({});
   const prevApPtsRef = useRef<Record<number, ChartPoint[]>>({});
@@ -271,7 +268,7 @@ export function useFleetHistory(): FleetHistoryState {
   };
 
   useEffect(() => {
-    const sockets: Socket[] = [];
+    const subKeys: Array<{ n: number; key: symbol }> = [];
     let cancelled = false;
 
     // Initial batch load for all 8 machines (parallel)
@@ -289,9 +286,7 @@ export function useFleetHistory(): FleetHistoryState {
       results.forEach((res, i) => {
         const n = i + 1;
 
-        // Revision guard: if socket already bumped revision, discard REST result
         if ((revisionRef.current[n] ?? 0) !== revisionsAtLoad[i]) {
-          // Still mark initialized so live data flows
           initializedRef.current[n] = true;
           return;
         }
@@ -308,7 +303,6 @@ export function useFleetHistory(): FleetHistoryState {
           latestTempPtsRef.current[n] = tPts;
           latestApPtsRef.current[n] = aPts;
 
-          // Load previous batch points
           if (previous) {
             prevBatchStartRef.current[n] = previous.batchStartMs;
             const prev = buildBatchPoints(previous.doc, previous.batchStartMs);
@@ -317,7 +311,6 @@ export function useFleetHistory(): FleetHistoryState {
           }
         }
 
-        // Mark initialized regardless of success/null
         initializedRef.current[n] = true;
       });
 
@@ -326,21 +319,12 @@ export function useFleetHistory(): FleetHistoryState {
 
     loadAll();
 
-    // Open 8 sockets for live appending
+    // Subscribe to shared sockets for live appending
     for (let n = 1; n <= 8; n++) {
-      const socket = io({ forceNew: true });
-      sockets.push(socket);
-
-      socket.on('connect', () => {
-        socket.emit('join_noi', String(n));
-      });
-
-      const machineN = n; // capture
+      const machineN = n;
 
       const onData = (payload: StagePayload[] | NoiChienDataPayload) => {
         if (cancelled) return;
-
-        // TASK 1: Initialization gate — ignore socket data until REST completes
         if (!initializedRef.current[machineN]) return;
 
         let stages: StagePayload[];
@@ -365,21 +349,11 @@ export function useFleetHistory(): FleetHistoryState {
         const previousStage = lastStageRef.current[machineN];
         const firstTick = !seenLiveTickRef.current[machineN];
 
-        // The server re-anchors stage 1 on every new batch, so while in stage 1
-        // `now − stage_elapsed_ms` IS the authoritative batch-start the machine
-        // card uses. Comparing it against the mark the chart currently holds is
-        // the one reliable signal: it works on the very first tick after load
-        // (no need for a previous elapsed), so it catches a stale REST doc whose
-        // giai_doan_1 timestamp is minutes older than the live batch, and it
-        // catches a genuine mid-stream batch change — both cases previousStage
-        // and !running miss.
         const currentMark = latestBatchStartRef.current[machineN];
         let serverBatchStart: number | null = null;
         if (stageNum === 1 && elapsedMs != null) {
           serverBatchStart = sensorTs.getTime() - elapsedMs;
         }
-        // Tolerance: real drift within a batch is seconds; a stale load or new
-        // batch is tens of minutes off.
         const REANCHOR_TOL_MS = 2 * 60 * 1000;
         const markDrifted =
           serverBatchStart != null &&
@@ -400,10 +374,6 @@ export function useFleetHistory(): FleetHistoryState {
         );
 
         if (startsNewBatch) {
-          // Move current latest → previous before resetting, but NOT on the
-          // first live tick after load: there the "current latest" is whatever
-          // REST built (possibly the stale doc we're discarding), and REST has
-          // already loaded the real previous batch — clobbering it would be wrong.
           if (!firstTick) {
             const curLatestTemp = latestTempPtsRef.current[machineN];
             const curLatestAp = latestApPtsRef.current[machineN];
@@ -415,9 +385,6 @@ export function useFleetHistory(): FleetHistoryState {
             }
           }
 
-          // Reset latest to new batch, anchored to the server's batch start so
-          // the first plotted point lands at the correct elapsed offset even if
-          // we detected the new batch late.
           revisionRef.current[machineN] = (revisionRef.current[machineN] ?? 0) + 1;
           latestBatchStartRef.current[machineN] = serverBatchStart ?? sensorTs.getTime();
           latestRunningRef.current[machineN] = true;
@@ -461,13 +428,18 @@ export function useFleetHistory(): FleetHistoryState {
         revisionRef.current[machineN] = (revisionRef.current[machineN] ?? 0) + 1;
       };
 
-      socket.on(`noi_chien_${n}_data`, onData as (...args: unknown[]) => void);
-      socket.on(`noi_chien_${n}_stop`, onStop);
+      const key = subscribe(n, [
+        [`noi_chien_${n}_data`, onData as (...args: unknown[]) => void],
+        [`noi_chien_${n}_stop`, onStop as (...args: unknown[]) => void],
+      ]);
+      subKeys.push({ n, key });
     }
 
     return () => {
       cancelled = true;
-      for (const s of sockets) s.disconnect();
+      for (const { n, key } of subKeys) {
+        unsubscribe(n, key);
+      }
     };
   }, []);
 

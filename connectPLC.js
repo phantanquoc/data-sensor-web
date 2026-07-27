@@ -37,7 +37,7 @@ async function connect(n) {
     }
 
     await plcConnections[n].connectTCP(process.env[ipEnv], {
-      port: process.env.PORT_PLC,
+      port: parseInt(process.env.PORT_PLC, 10) || 502,
     });
     plcConnections[n].setID(1);
     plcConnections[n].setTimeout(MODBUS_TIMEOUT_MS);

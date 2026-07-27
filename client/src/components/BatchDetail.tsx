@@ -162,7 +162,8 @@ export const BatchDetail: React.FC<BatchDetailProps> = ({ data }) => {
               <span>Thời gian</span>
               <span>Nhiệt độ</span>
               <span>Áp suất</span>
-              <span>Dòng điện</span>
+              <span>Dòng điện Root</span>
+              <span>Dòng điện vòng nước</span>
             </div>
             {perfRows.map((row) => {
               const giay = row.snap?.giay_tu_start;
@@ -173,6 +174,7 @@ export const BatchDetail: React.FC<BatchDetailProps> = ({ data }) => {
                   <b>{formatValue(perfNumber(row.snap, 'nhiet_do'))}</b>
                   <b>{formatValue(perfNumber(row.snap, 'ap_suat_chan_khong'))}</b>
                   <b>{formatValue(perfNumber(row.snap, 'dong_dien_dong_co_root'))}</b>
+                  <b>{formatValue(perfNumber(row.snap, 'dong_dien_dong_co_vong_nuoc'))}</b>
                 </div>
               );
             })}

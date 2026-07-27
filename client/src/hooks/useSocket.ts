@@ -28,7 +28,7 @@ export function useSocket({ soNoiChien, onData, onStop }: UseSocketOptions) {
     };
   }, []);
 
-  // Re-join room and re-subscribe on tab switch
+  // Re-join room and re-subscribe on tab switch — only active fryer listeners
   useEffect(() => {
     const socket = socketRef.current;
     if (!socket) return;
@@ -38,7 +38,6 @@ export function useSocket({ soNoiChien, onData, onStop }: UseSocketOptions) {
     }
 
     const dataHandler = (payload: StagePayload[] | NoiChienDataPayload) => {
-      // Backward-compat: old server sends raw array, new server sends wrapper object
       if (Array.isArray(payload)) {
         onData(payload, undefined, undefined);
       } else {
@@ -49,31 +48,16 @@ export function useSocket({ soNoiChien, onData, onStop }: UseSocketOptions) {
       onStop();
     };
 
-    // Subscribe to all 8 fryers but only process active one
-    const handlers: Array<{ event: string; handler: (...args: unknown[]) => void }> = [];
-    for (let n = 1; n <= 8; n++) {
-      const dataEvent = `noi_chien_${n}_data`;
-      const stopEvent = `noi_chien_${n}_stop`;
-      const dh = (payload: StagePayload[] | NoiChienDataPayload) => {
-        if (soNoiChien === String(n)) {
-          dataHandler(payload);
-        }
-      };
-      const sh = () => {
-        if (soNoiChien === String(n)) {
-          stopHandler();
-        }
-      };
-      socket.on(dataEvent, dh as (...args: unknown[]) => void);
-      socket.on(stopEvent, sh as (...args: unknown[]) => void);
-      handlers.push({ event: dataEvent, handler: dh as (...args: unknown[]) => void });
-      handlers.push({ event: stopEvent, handler: sh as (...args: unknown[]) => void });
-    }
+    // Register only the active fryer's listeners (not all 8)
+    const dataEvent = `noi_chien_${soNoiChien}_data`;
+    const stopEvent = `noi_chien_${soNoiChien}_stop`;
+
+    socket.on(dataEvent, dataHandler as (...args: unknown[]) => void);
+    socket.on(stopEvent, stopHandler as (...args: unknown[]) => void);
 
     return () => {
-      for (const { event, handler } of handlers) {
-        socket.off(event, handler);
-      }
+      socket.off(dataEvent, dataHandler as (...args: unknown[]) => void);
+      socket.off(stopEvent, stopHandler as (...args: unknown[]) => void);
     };
   }, [soNoiChien, onData, onStop]);
 
