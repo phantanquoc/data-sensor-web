@@ -7,7 +7,7 @@
     "start": "nodemon app.js",
     "start:prod": "node app.js",
     "build:client": "npm --prefix client install && npm --prefix client run build",
-    "test": "node --test"
+    "test": "node --experimental-strip-types --test"
   },
   "keywords": [],
   "author": "",

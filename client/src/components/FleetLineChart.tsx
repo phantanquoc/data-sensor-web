@@ -20,6 +20,7 @@ import {
 } from 'recharts';
 import type { MachineSeries } from '../hooks/useFleetHistory';
 import { useTheme } from '../hooks/useTheme';
+import { buildMerged } from './fleetChartData';
 
 interface FleetLineChartProps {
   /** Chart title displayed above the chart */
@@ -165,78 +166,13 @@ export const FleetLineChart: React.FC<FleetLineChartProps> = ({
     if (activeSeries.length === 0) {
       return { merged: [], xMax: 0, presentMachines: [] as { n: number; color: string }[], yScale: emptyScale };
     }
-    // Derive present machines, compute xMax (phut) and value min/max (for Y scale)
-    const machines = activeSeries.map((s) => ({ n: s.n, color: s.color }));
-    let max = 0;
-    let vMin = Infinity;
-    let vMax = -Infinity;
-    for (const s of activeSeries) {
-      for (const p of s.points) {
-        if (p.phut > max) max = p.phut;
-        if (p.value < vMin) vMin = p.value;
-        if (p.value > vMax) vMax = p.value;
-      }
-    }
+
+    const { rows, xMax: max, vMin, vMax, machines } = buildMerged(activeSeries);
     const yScale = buildYScale(vMin, vMax);
 
-    if (max <= 0) {
+    if (rows.length === 0) {
       return { merged: [{ phut: 0 }], xMax: 0, presentMachines: machines, yScale };
     }
-
-    // Build even grid
-    const STEP = Math.max(0.5, max / 600);
-    const grid: number[] = [];
-    for (let t = 0; t <= max; t += STEP) {
-      grid.push(t);
-    }
-    // Guarantee final value equals xMax
-    if (grid.length === 0 || grid[grid.length - 1] < max) {
-      grid.push(max);
-    } else if (grid[grid.length - 1] > max) {
-      grid[grid.length - 1] = max;
-    }
-
-    // Build rows with interpolated per-machine values
-    const rows: Record<string, number | null | undefined>[] = grid.map((t) => {
-      const row: Record<string, number | null | undefined> = { phut: t };
-
-      for (const s of activeSeries) {
-        const key = `m${s.n}`;
-        const stageKey = `${key}_stage`;
-        const pts = s.points;
-
-        if (pts.length === 0 || t < pts[0].phut || t > pts[pts.length - 1].phut) {
-          row[key] = null;
-          continue;
-        }
-
-        // Find bracketing pair via linear scan
-        let left = pts[0];
-        let right = pts[0];
-        for (let i = 0; i < pts.length - 1; i++) {
-          if (pts[i].phut <= t && pts[i + 1].phut >= t) {
-            left = pts[i];
-            right = pts[i + 1];
-            break;
-          }
-        }
-        // Edge: t exactly equals last point
-        if (t >= pts[pts.length - 1].phut) {
-          left = pts[pts.length - 1];
-          right = left;
-        }
-
-        // Linear interpolation
-        const denom = right.phut - left.phut;
-        const val = denom === 0
-          ? left.value
-          : left.value + (right.value - left.value) * (t - left.phut) / denom;
-        row[key] = val;
-        row[stageKey] = left.stage;
-      }
-
-      return row;
-    });
 
     return { merged: rows, xMax: max, presentMachines: machines, yScale };
   }, [activeSeries]);

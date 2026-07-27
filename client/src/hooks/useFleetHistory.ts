@@ -18,6 +18,7 @@ import { useEffect, useRef, useState } from 'react';
 import { subscribe, unsubscribe } from './sharedSockets';
 import { getNoiChien, getNoiChienDetail } from '../api';
 import { parseTs } from './timeUtils';
+import { decideRotation } from './batchRotation';
 import type {
   StagePayload,
   NoiChienDataPayload,
@@ -221,7 +222,6 @@ export function useFleetHistory(): FleetHistoryState {
   const latestRunningRef = useRef<Record<number, boolean>>({});
   const lastStageRef = useRef<Record<number, 1 | 2 | 3 | 4 | null>>({});
   const lastElapsedRef = useRef<Record<number, number | null>>({});
-  const seenLiveTickRef = useRef<Record<number, boolean>>({});
   const revisionRef = useRef<Record<number, number>>({});
   const latestTempPtsRef = useRef<Record<number, ChartPoint[]>>({});
   const latestApPtsRef = useRef<Record<number, ChartPoint[]>>({});
@@ -286,28 +286,39 @@ export function useFleetHistory(): FleetHistoryState {
       results.forEach((res, i) => {
         const n = i + 1;
 
-        if ((revisionRef.current[n] ?? 0) !== revisionsAtLoad[i]) {
-          initializedRef.current[n] = true;
-          return;
-        }
+        // Mẻ MỚI đã bắt đầu trong lúc request còn bay (revision đổi) → payload
+        // REST thuộc mẻ CŨ. Nạp vào `latest` sẽ trộn hai mẻ và làm lệch mốc
+        // batchStart mà tick live đã đặt cho mẻ mới. Nhưng cũng không nên bỏ
+        // đi: mẻ cũ chính là "Mẻ trước" của hệ này. Đưa xuống slot previous,
+        // để `latest` cho tick live dựng.
+        const staleLoad = (revisionRef.current[n] ?? 0) !== revisionsAtLoad[i];
 
         if (res.status === 'fulfilled' && res.value.latest) {
           const { latest, previous } = res.value;
           const { doc, batchStartMs, running, lastStage } = latest;
+          const built = buildBatchPoints(doc, batchStartMs);
 
-          latestBatchStartRef.current[n] = batchStartMs;
-          latestRunningRef.current[n] = running;
-          lastStageRef.current[n] = lastStage;
+          if (staleLoad) {
+            // Chỉ điền previous nếu tick live chưa tự đẩy mẻ cũ xuống đó.
+            if ((prevTempPtsRef.current[n]?.length ?? 0) === 0
+              && (prevApPtsRef.current[n]?.length ?? 0) === 0) {
+              prevBatchStartRef.current[n] = batchStartMs;
+              prevTempPtsRef.current[n] = built.tPts;
+              prevApPtsRef.current[n] = built.aPts;
+            }
+          } else {
+            latestBatchStartRef.current[n] = batchStartMs;
+            latestRunningRef.current[n] = running;
+            lastStageRef.current[n] = lastStage;
+            latestTempPtsRef.current[n] = built.tPts;
+            latestApPtsRef.current[n] = built.aPts;
 
-          const { tPts, aPts } = buildBatchPoints(doc, batchStartMs);
-          latestTempPtsRef.current[n] = tPts;
-          latestApPtsRef.current[n] = aPts;
-
-          if (previous) {
-            prevBatchStartRef.current[n] = previous.batchStartMs;
-            const prev = buildBatchPoints(previous.doc, previous.batchStartMs);
-            prevTempPtsRef.current[n] = prev.tPts;
-            prevApPtsRef.current[n] = prev.aPts;
+            if (previous) {
+              prevBatchStartRef.current[n] = previous.batchStartMs;
+              const prev = buildBatchPoints(previous.doc, previous.batchStartMs);
+              prevTempPtsRef.current[n] = prev.tPts;
+              prevApPtsRef.current[n] = prev.aPts;
+            }
           }
         }
 
@@ -346,43 +357,32 @@ export function useFleetHistory(): FleetHistoryState {
         const sensorTs = parseTs(sensor.thoi_gian);
         if (!sensorTs) return;
 
-        const previousStage = lastStageRef.current[machineN];
-        const firstTick = !seenLiveTickRef.current[machineN];
-
-        const currentMark = latestBatchStartRef.current[machineN];
-        let serverBatchStart: number | null = null;
-        if (stageNum === 1 && elapsedMs != null) {
-          serverBatchStart = sensorTs.getTime() - elapsedMs;
-        }
-        const REANCHOR_TOL_MS = 2 * 60 * 1000;
-        const markDrifted =
-          serverBatchStart != null &&
-          (currentMark == null || Math.abs(currentMark - serverBatchStart) > REANCHOR_TOL_MS);
-
-        const prevElapsed = lastElapsedRef.current[machineN];
-        const elapsedReset =
-          stageNum === 1 &&
-          elapsedMs != null &&
-          prevElapsed != null &&
-          elapsedMs < prevElapsed;
-
-        const startsNewBatch = stageNum === 1 && (
-          markDrifted
-          || !latestRunningRef.current[machineN]
-          || (previousStage != null && previousStage > 1)
-          || elapsedReset
-        );
+        const { startsNewBatch, serverBatchStart } = decideRotation({
+          stageNum,
+          elapsedMs,
+          sensorTsMs: sensorTs.getTime(),
+          currentMark: latestBatchStartRef.current[machineN] ?? null,
+          running: latestRunningRef.current[machineN] ?? false,
+          previousStage: lastStageRef.current[machineN] ?? null,
+          prevElapsed: lastElapsedRef.current[machineN] ?? null,
+        });
 
         if (startsNewBatch) {
-          if (!firstTick) {
-            const curLatestTemp = latestTempPtsRef.current[machineN];
-            const curLatestAp = latestApPtsRef.current[machineN];
-            const curLatestStart = latestBatchStartRef.current[machineN];
-            if (curLatestStart != null && ((curLatestTemp && curLatestTemp.length > 0) || (curLatestAp && curLatestAp.length > 0))) {
-              prevBatchStartRef.current[machineN] = curLatestStart;
-              prevTempPtsRef.current[machineN] = curLatestTemp ?? [];
-              prevApPtsRef.current[machineN] = curLatestAp ?? [];
-            }
+          // Một máy sang mẻ mới → mẻ hiện tại CỦA MÁY ĐÓ tụt xuống "Mẻ trước",
+          // các máy khác không bị ảnh hưởng. Hai mẻ do đó chạy song song trên
+          // hai tab của biểu đồ.
+          //
+          // Trước đây bước này bị chặn bởi !firstTick, nên mẻ vừa tải bằng REST
+          // bị xoá trắng mà không sang được "Mẻ trước" nếu tick live ĐẦU TIÊN
+          // của máy đã là mẻ mới — đúng tình huống mở trang ngay lúc đổi mẻ.
+          const curLatestTemp = latestTempPtsRef.current[machineN];
+          const curLatestAp = latestApPtsRef.current[machineN];
+          const curLatestStart = latestBatchStartRef.current[machineN];
+          const hasCurrent = (curLatestTemp?.length ?? 0) > 0 || (curLatestAp?.length ?? 0) > 0;
+          if (curLatestStart != null && hasCurrent) {
+            prevBatchStartRef.current[machineN] = curLatestStart;
+            prevTempPtsRef.current[machineN] = curLatestTemp ?? [];
+            prevApPtsRef.current[machineN] = curLatestAp ?? [];
           }
 
           revisionRef.current[machineN] = (revisionRef.current[machineN] ?? 0) + 1;
@@ -401,7 +401,6 @@ export function useFleetHistory(): FleetHistoryState {
         if (nowPhut < 0) return;
         lastStageRef.current[machineN] = stageNum;
         lastElapsedRef.current[machineN] = elapsedMs;
-        seenLiveTickRef.current[machineN] = true;
 
         // --- Temperature ---
         const tPts = latestTempPtsRef.current[machineN] ?? [];
@@ -424,8 +423,13 @@ export function useFleetHistory(): FleetHistoryState {
 
       const onStop = () => {
         if (cancelled) return;
+        // Chỉ hạ cờ đang chạy. KHÔNG tăng revision: revision là tín hiệu "dữ
+        // liệu REST đang tải đã lỗi thời vì mẻ khác đã bắt đầu". Mẻ dừng không
+        // làm dữ liệu đã tải sai — mẻ vừa dừng chính là mẻ cần vẽ. Tăng ở đây
+        // khiến guard trong loadAll xoá sạch payload REST của hệ đó nếu stop
+        // rơi đúng lúc request còn bay, và hệ đó biến mất khỏi biểu đồ dù
+        // legend vẫn hiện tên.
         latestRunningRef.current[machineN] = false;
-        revisionRef.current[machineN] = (revisionRef.current[machineN] ?? 0) + 1;
       };
 
       const key = subscribe(n, [
