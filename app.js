@@ -148,6 +148,7 @@ connectMongo();
 const { plcConnections, connect, getStatus, updateStatus } = require("./connectPLC");
 const plcModels = require("./model/plc_schema");
 const { postDataPlc, getLatestStages, setBatchDocId, setBatchStartMs, shouldResumeAsNewBatch } = require("./controller/post_data_plc");
+const { isCycleFresh, nextStaleState } = require("./utils/modbus_health");
 const { Buffer } = require("buffer");
 
 // Khi khởi động lại: KHÔNG đóng mẻ đang chạy. Trỏ lại id_document về mẻ mở
@@ -311,6 +312,8 @@ const lastConfigRead = {}; // mốc thời gian (ms) lần cuối đọc block c
 const needConfigRead = {}; // cờ ép đọc config ở cycle tới (kết nối lại / sườn lên M120)
 const resumePending = {};  // guard D60-backwards cho cycle đầu tiên sau resume
 const resumedTong = {};    // tong_thoi_gian_chay lưu trên mẻ mở khi resume
+const staleStreak = {};    // số cycle liên tiếp có block đọc lỗi
+const reconnecting = {};   // đang có một connect() chạy dở → không gọi thêm
 for (let n = 1; n <= 8; n++) {
   Start[n] = 0;
   isStart[n] = false;
@@ -321,6 +324,8 @@ for (let n = 1; n <= 8; n++) {
   needConfigRead[n] = true; // đọc config ngay ở cycle đầu tiên
   resumePending[n] = false;
   resumedTong[n] = 0;
+  staleStreak[n] = 0;
+  reconnecting[n] = false;
 }
 
 // Chu kỳ làm mới config định kỳ (phương án C): 60s
@@ -362,9 +367,11 @@ const CONFIG_HOLDING_BLOCKS = [
 // Đọc 1 nhóm holding-block tuần tự (một request tại một thời điểm / kết nối).
 // Split response.data[addr-start] vào reg.val theo địa chỉ Modbus (bảo toàn offset +1).
 // Per-block fallback: block lỗi thì đọc lẻ từng thanh ghi, không ảnh hưởng block khác.
+// Trả về mảng nhãn block lỗi ("h<start>") để cycle biết dữ liệu có tươi hay không.
 async function readHoldingBlocks(cfg, blocks) {
   const n = cfg.index;
   const conn = plcConnections[n];
+  const failed = [];
   for (const [start, count] of blocks) {
     try {
       const response = await conn.readHoldingRegisters(start, count);
@@ -375,15 +382,18 @@ async function readHoldingBlocks(cfg, blocks) {
       }
     } catch (err) {
       console.warn(`PLC${n} holdingBlock [${start},${count}] read failed: ${err.message} — keeping stale values`);
-      // Keep reg.val unchanged (stale value for one cycle is acceptable)
+      failed.push("h" + start);
+      // reg.val giữ nguyên; cycle sẽ tự quyết định có ghi DB hay không.
     }
   }
+  return failed;
 }
 
 // Đọc 1 nhóm coil-block tuần tự (cùng nguyên tắc split + fallback như holding).
 async function readCoilBlocks(cfg, blocks) {
   const n = cfg.index;
   const conn = plcConnections[n];
+  const failed = [];
   for (const [start, count] of blocks) {
     try {
       const response = await conn.readCoils(start, count);
@@ -394,9 +404,10 @@ async function readCoilBlocks(cfg, blocks) {
       }
     } catch (err) {
       console.warn(`PLC${n} coilBlock [${start},${count}] read failed: ${err.message} — keeping stale values`);
-      // Keep reg.val unchanged (stale value for one cycle is acceptable)
+      failed.push("c" + start);
     }
   }
+  return failed;
 }
 
 // readAllRegisters — defined ONCE, parameterized by fryer config.
@@ -407,8 +418,9 @@ async function readAllRegisters(cfg) {
   const n = cfg.index;
 
   // 1) REALTIME — mỗi cycle
-  await readHoldingBlocks(cfg, REALTIME_HOLDING_BLOCKS);
-  await readCoilBlocks(cfg, REALTIME_COIL_BLOCKS);
+  const failedBlocks = [];
+  failedBlocks.push(...(await readHoldingBlocks(cfg, REALTIME_HOLDING_BLOCKS)));
+  failedBlocks.push(...(await readCoilBlocks(cfg, REALTIME_COIL_BLOCKS)));
 
   // 2) Sườn lên M120 (mẻ vừa bắt đầu) → ép đọc config để thông số cài đặt tươi ngay đầu mẻ.
   //    M120 mới nằm ở reg.val (chưa map vào cfg.values); isStart[n] còn là trạng thái mẻ trước.
@@ -422,9 +434,11 @@ async function readAllRegisters(cfg) {
   const now = Date.now();
   const dueByTimer = now - lastConfigRead[n] >= CONFIG_REFRESH_MS;
   if (needConfigRead[n] || dueByTimer) {
-    await readHoldingBlocks(cfg, CONFIG_HOLDING_BLOCKS);
+    const cfgFailed = await readHoldingBlocks(cfg, CONFIG_HOLDING_BLOCKS);
+    failedBlocks.push(...cfgFailed);
     lastConfigRead[n] = now;
-    needConfigRead[n] = false;
+    // Block config lỗi thì thử lại cycle sau thay vì chờ hết 60s.
+    needConfigRead[n] = cfgFailed.length > 0;
   }
 
   dbg("Tất cả đã hoàn tất");
@@ -439,6 +453,17 @@ async function readAllRegisters(cfg) {
   const giai_doan_2 = cfg.values["M124"];
   const giai_doan_3 = cfg.values["M126"];
   const giai_doan_4 = cfg.values["M127"];
+
+  // Cycle có block cảm biến lỗi → reg.val là giá trị của cycle trước. Ghi vào DB
+  // lúc này tạo ra một điểm dữ liệu cũ mang nhãn thời gian mới. Bỏ qua cycle,
+  // giữ nguyên Start[n]/isStart[n] để sườn lên/xuống M120 vẫn bắt đúng ở cycle
+  // sau (khi dữ liệu đã tươi).
+  if (!isCycleFresh(failedBlocks)) {
+    console.warn(
+      `PLC${n} bỏ ghi cycle: block lỗi [${failedBlocks.join(", ")}] — dữ liệu không tươi`,
+    );
+    return failedBlocks;
+  }
 
   // Guard nối lại mẻ: nếu trong lúc server tắt máy đã stop mẻ cũ và bắt đầu mẻ MỚI
   // (D60 tụt lùi so với tổng đã lưu) thì KHÔNG ghi tiếp vào mẻ cũ. Hạ cờ để logic
@@ -473,14 +498,27 @@ async function readAllRegisters(cfg) {
     await postDataPlc(cfg.model, n, cfg.values, io_, Start[n], giai_doan_1, giai_doan_2, giai_doan_3, giai_doan_4);
     dbg("đã stop gét data PLC" + n);
   }
+
+  return failedBlocks;
 }
 
-// plcLoop — initial connect per fryer (5000ms retry on failure)
+// plcLoop — connect 1 nồi, tự thử lại sau 5s nếu thất bại.
+// reconnecting[n] chặn nhiều lần connect() song song lên cùng một HMI: màn HMI
+// chỉ nhận MỘT client TCP, hai connect() chồng nhau làm socket đập liên tục.
 function plcLoop(n) {
-  connect(n).catch((err) => {
-    console.error("PLC Connect Error:", err.message);
-    setTimeout(() => plcLoop(n), 5000);
-  });
+  if (reconnecting[n]) return;
+  reconnecting[n] = true;
+  connect(n)
+    .then(() => {
+      reconnecting[n] = false;
+      staleStreak[n] = 0;
+    })
+    .catch((err) => {
+      console.error(`PLC${n} Connect Error:`, err.message);
+      reconnecting[n] = false;
+      clearTimeout(timerOut_else[n]);
+      timerOut_else[n] = setTimeout(() => plcLoop(n), 5000);
+    });
 }
 
 for (let n = 1; n <= 8; n++) {
@@ -504,13 +542,35 @@ function scheduleRead(n) {
         if (isConn) needConfigRead[n] = true;
       }
 
-      if (status["isConnectPLC_" + n]) {
+      if (isConn) {
         if (dbConnected && isServer) {
           clearTimeout(timerOut_else[n]);
-          await readAllRegisters(cfg);
+          timerOut_else[n] = null;
+          const failed = await readAllRegisters(cfg);
+
+          // Cờ isConnected chỉ được set trong connect(); nếu không hạ ở đây thì
+          // một socket đứt giữa cycle sẽ mãi báo "connected" và nhánh reconnect
+          // dưới không bao giờ chạy.
+          const { streak, shouldDrop } = nextStaleState(staleStreak[n], failed.length > 0);
+          staleStreak[n] = streak;
+          if (shouldDrop) {
+            console.warn(
+              `PLC${n} ${streak} cycle liên tiếp đọc lỗi → hạ cờ kết nối, sẽ kết nối lại`,
+            );
+            updateStatus(n, false);
+            staleStreak[n] = 0;
+            needConfigRead[n] = true; // đọc lại config sau khi nối lại
+          }
         }
       } else {
-        timerOut_else[n] = setTimeout(() => plcLoop(n), 1000);
+        // Chỉ hẹn MỘT timer: nhánh này chạy mỗi 800ms, ghi đè biến như trước sẽ
+        // để lại hàng loạt timer mồ côi, mỗi cái gọi connect() một lần.
+        if (!timerOut_else[n] && !reconnecting[n]) {
+          timerOut_else[n] = setTimeout(() => {
+            timerOut_else[n] = null;
+            plcLoop(n);
+          }, 1000);
+        }
         dbg("đagn cố gắng kết nối else_plc" + n);
       }
     } catch (err) {
