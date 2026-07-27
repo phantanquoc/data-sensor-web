@@ -15,10 +15,10 @@ function dbg(...args) { if (DEBUG) console.log(...args); }
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// React SPA is the primary UI at `/`. Its static assets (hashed JS/CSS under
-// /assets) are served from the Vite build output so they resolve at the root.
+// Backend chỉ phục vụ API + Socket.IO. Frontend là service riêng (Vite, port 5174).
+// Vẫn serve client/dist nếu có sẵn — để chạy được độc lập khi không dùng Docker.
 const SPA_DIR = path.join(__dirname, "client", "dist");
-app.use(express.static(SPA_DIR));            // React build (index.html, /assets/*)
+app.use(express.static(SPA_DIR));
 
 app.post("/enable_machine", (req, res, next) => {
   console.log(req.body);
@@ -38,8 +38,8 @@ app.use((req, res, next) => {
   if (req.method !== "GET") return next();
   const indexPath = path.join(SPA_DIR, "index.html");
   if (!fs.existsSync(indexPath)) {
-    return res.status(503).type("text/plain").send(
-      "Client chưa được build. Chạy: npm run build:client (hoặc npm --prefix client run build) rồi khởi động lại."
+    return res.status(404).type("text/plain").send(
+      "Đây là backend API (port 3000). Giao diện chạy ở http://localhost:5174"
     );
   }
   res.sendFile(indexPath);

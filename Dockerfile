@@ -1,28 +1,15 @@
-# Stage 1: Build the React client
-FROM node:22-alpine AS client-build
-
-WORKDIR /app/client
-
-COPY client/package*.json ./
-RUN npm ci
-
-COPY client/ ./
-RUN npm run build
-
-# Stage 2: Production runtime
+# Backend: API + Socket.IO + Modbus poller.
+# KHÔNG build/serve React nữa — frontend là service riêng (Dockerfile.frontend, port 5174).
 FROM node:22-alpine
 
 WORKDIR /app
 
-# Install backend dependencies (omit dev)
+# Backend dependencies (bỏ devDependencies)
 COPY package*.json ./
 RUN npm install --omit=dev
 
-# Copy backend source
+# Backend source
 COPY . .
-
-# Copy built client from stage 1
-COPY --from=client-build /app/client/dist ./client/dist
 
 EXPOSE 3000
 
