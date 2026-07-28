@@ -33,29 +33,62 @@ const batchStartMs = {};
 const m155Prev = {};
 const giayVaoGd1 = {};
 
-// --- HIỆU SUẤT MÁY: ảnh chụp full sensor tại sườn lên đầu tiên trong mẻ, per-fryer. ---
-// m1Prev[n]: trạng thái M1 (bắt đầu kick root) chu kỳ trước (bắt sườn lên).
-// hieuSuatKickRoot[n]: snapshot tại M1 on lần đầu (null = chưa chụp). Reset ở đầu mẻ.
-// hieuSuatNhungHang[n]: snapshot tại M155 (null = chưa chụp). Reset ở đầu mẻ.
-//   Chụp lại mỗi cycle khi M155 còn on cho tới khi ap_suat_chan_khong (D672) khác 0 thì khóa
-//   — vì PLC latch D672 trễ vài chu kỳ sau sườn lên nhưng giữ giá trị suốt Giai đoạn 1.
+// --- HIỆU SUẤT MÁY: ảnh chụp tại sườn lên M1 / M155, per-fryer. ---
+//
+// Nguyên tắc: mỗi ô CHỐT MỘT LẦN rồi cố định vĩnh viễn. Không ghi đè, vì mục đích
+// của bảng là thông số ĐÚNG TẠI thời điểm sự kiện — xem lại sau phải ra cùng số.
+//
+// Bốn nhóm ô, bốn cách chốt:
+//
+//  1. Cảm biến tức thời (nhiệt độ): chụp NGAY tại cycle bắt sườn lên.
+//  2. Dòng điện (root + vòng nước): chốt ngay nếu giá trị trong (0, 50]. Nếu chưa dùng
+//     được thì đợi tối đa DONG_DIEN_MAX_WAIT_CYCLES cycle VÀ chỉ khi còn trong pha của
+//     mốc. Hết window → chốt null (UI hiện '—').
+//  3. Thanh ghi PLC latch (thời gian + áp suất): PLC ghi trễ vài cycle → đọc tối đa
+//     PLC_LATCH_MAX_READS lần; khác 0 → chốt. Hết lượt vẫn 0 → chốt null (phân biệt
+//     "không đo được" với "đo được = 0").
+//  4. Ghi DB: MỘT updateOne duy nhất mỗi cycle mỗi row. Cell chỉ đánh dấu Done SAU KHI
+//     write resolve thành công; reject → giữ RAM, retry cycle sau.
 const m1Prev = {};
-const hieuSuatKickRoot = {};
-const hieuSuatNhungHang = {};
-// Đếm số cycle đã chụp lại nhúng hàng (tránh ghi DB vô hạn nếu dòng điện không ổn định).
-// Sau MAX cycle → khóa snapshot dù dòng điện còn bất thường.
-const nhungHangRetries = {};
-const NHUNG_HANG_MAX_RETRIES = 20; // ~20 cycles ≈ 20-40s (cycle ~1-2s)
+const hieuSuatKickRoot = {};      // RAM snapshot của row kick_root
+const hieuSuatNhungHang = {};     // RAM snapshot của row nhung_hang
+// Theo dõi row đã persist thành công vào DB chưa (lần đầu = whole-object, sau = field-path)
+const kickRootPersisted = {};     // true khi write whole-object thành công
+const nhungHangPersisted = {};
 
-// Retry kick_root dòng điện: thay setTimeout(2s) bằng retry mỗi cycle cho tới khi hợp lệ.
-const kickRootRetries = {};
-const kickRootLocked = {};
-const KICK_ROOT_MAX_RETRIES = 10; // ~10 cycles ≈ 8-16s
+// Số lần đọc lại tối đa cho nhóm thanh ghi PLC latch (thời gian + áp suất).
+const PLC_LATCH_MAX_READS = 5;
 
-// Dòng điện mới nhất mỗi cycle, per-fryer. Dùng để chụp TRỄ cho cột "Dòng điện"
-// của mốc kick_root (M1) & nhúng hàng (M155): tại sườn lên, motor vừa nhận lệnh →
-// thanh ghi PLC có thể chứa giá trị quá độ (vài nghìn A). Sau vài giây motor ổn định
-// → đọc lại giá trị này ghi đè vào snapshot.
+// Số cycle tối đa chờ dòng điện hợp lệ (root + vòng nước, cả 2 mốc).
+const DONG_DIEN_MAX_WAIT_CYCLES = 10;
+
+// Cờ chốt từng ô, per-fryer. Reset ở đầu mẻ (Start === 1).
+// Chốt riêng từng ô để một ô rác không giữ ô tốt lại chờ cùng: đo trên 258 mẻ,
+// vòng nước hợp lệ 96.9% còn root chỉ ~61%.
+//
+// HAI LỚP CỜ (tách "giá trị ổn định trong RAM" khỏi "đã ghi DB"):
+//   *Settled = giá trị đã xác định trong RAM → KHÔNG BAO GIỜ rollback. Bảo vệ RAM
+//             khỏi bị window-close ghi đè null khi write DB thất bại.
+//   *Done    = ô đã persist thành công vào DB. Khi write reject → rollback Done (để
+//             retry write), nhưng Settled giữ nguyên nên RAM an toàn.
+const kickRootLatchReads = {};   // số lần đã đọc nhóm latch của kick_root
+const kickRootLatchSettled = {}; // giá trị latch đã xác định trong RAM (sticky)
+const kickRootLatchDone = {};    // đã persist thời gian + áp suất kick_root vào DB
+const kickRootRootSettled = {};  // giá trị root current đã xác định trong RAM (sticky)
+const kickRootRootDone = {};     // đã persist dòng điện root của kick_root vào DB
+const kickRootVongNuocSettled = {}; // giá trị vòng nước current đã xác định trong RAM (sticky)
+const kickRootVongNuocDone = {}; // đã persist dòng điện vòng nước của kick_root vào DB
+const kickRootCycles = {};       // số cycle kể từ sườn lên M1 (đếm window chờ dòng điện)
+const nhungHangLatchReads = {};  // số lần đã đọc nhóm latch của nhung_hang
+const nhungHangLatchSettled = {}; // giá trị latch đã xác định trong RAM (sticky)
+const nhungHangLatchDone = {};   // đã persist thời gian + áp suất nhung_hang vào DB
+const nhungHangRootSettled = {}; // giá trị root current đã xác định trong RAM (sticky)
+const nhungHangRootDone = {};    // đã persist dòng điện root của nhung_hang vào DB
+const nhungHangVongNuocSettled = {}; // giá trị vòng nước current đã xác định trong RAM (sticky)
+const nhungHangVongNuocDone = {}; // đã persist dòng điện vòng nước của nhung_hang vào DB
+const nhungHangCycles = {};      // số cycle kể từ sườn lên M155
+
+// Dòng điện mới nhất mỗi cycle, per-fryer. Dùng cho ô dòng điện khi cần chờ đọc lại.
 const dongDienRootMoiNhat = {};
 const dongDienVongNuocMoiNhat = {};
 
@@ -63,6 +96,43 @@ const dongDienVongNuocMoiNhat = {};
 // Motor root ~5-12A, motor vòng nước ~10-25A → max thực tế < 50A.
 const DONG_DIEN_MAX_REASONABLE = 50;
 exports.DONG_DIEN_MAX_REASONABLE = DONG_DIEN_MAX_REASONABLE;
+exports.PLC_LATCH_MAX_READS = PLC_LATCH_MAX_READS;
+exports.DONG_DIEN_MAX_WAIT_CYCLES = DONG_DIEN_MAX_WAIT_CYCLES;
+
+/**
+ * Dòng điện có dùng được không? Phải trong (0, MAX].
+ * 0 = chưa đọc kịp; > MAX = nhiễu quá độ lúc motor vừa nhận lệnh.
+ */
+function dongDienHopLe(v) {
+  return Number.isFinite(v) && v > 0 && v <= DONG_DIEN_MAX_REASONABLE;
+}
+exports.dongDienHopLe = dongDienHopLe;
+
+/**
+ * Đã đến lúc chốt dòng điện chưa? (dùng chung cho root và vòng nước, cả 2 mốc)
+ * Giá trị trong (0, 50] → chốt luôn. Ngoài dải → chưa chốt.
+ * @param {number} v - dòng điện đọc ở cycle này
+ */
+function nenChotDongDien(v) {
+  return dongDienHopLe(v);
+}
+exports.nenChotDongDien = nenChotDongDien;
+// Giữ tên cũ cho tương thích ngược (test pure helper)
+const nenChotDongDienRoot = nenChotDongDien;
+exports.nenChotDongDienRoot = nenChotDongDienRoot;
+
+/**
+ * Đã đến lúc chốt nhóm thanh ghi PLC latch (thời gian + áp suất) chưa?
+ * Khác 0 là đọc được → chốt. Hết lượt đọc mà vẫn 0 → chốt null (không đo được).
+ * @param {number} reads - lần đọc thứ mấy (1 = lần đầu)
+ * @param {number} giay - thời gian từ PLC (D668*60+D666 hoặc D676*60+D674)
+ * @param {number} apSuat - áp suất từ PLC (D216/D217 hoặc D672/D673)
+ */
+function nenChotLatchPlc(reads, giay, apSuat) {
+  const coData = Number(giay) !== 0 || Number(apSuat) !== 0;
+  return coData || (Number(reads) || 0) >= PLC_LATCH_MAX_READS;
+}
+exports.nenChotLatchPlc = nenChotLatchPlc;
 
 function temporaryBatchCode(n, startedAt, id) {
   const datePart = formatVietnamDateCode(startedAt);
@@ -394,85 +464,264 @@ exports.postDataPlc = async (
     nhiet_do_ra_bom_vong_nuoc: d87 / 10,
   });
 
-  // --- M1 (bắt đầu kick root) rising edge → chụp hiệu suất máy (1 lần/mẻ) ---
+  // --- M1 (bắt đầu kick root) sườn lên → chụp cảm biến tại đúng thời điểm đó ---
+  // Chụp vào RAM NGAY tại sườn lên, BẤT KỂ id_document có sẵn hay chưa.
+  // Persist vào DB ở bước dưới — nếu id chưa có thì retry cycle sau.
   const m1Now = values && values["M1"] === true;
-  if (Start > 1 && m1Now && !m1Prev[n] && !hieuSuatKickRoot[n] && id_document[n]) {
-    // Thời gian + áp suất đọc thẳng từ PLC (D668/D666 phút·giây, D216 float).
-    // Nhiệt độ + dòng điện giữ ảnh chụp cảm biến tại sườn lên (PLC không có thanh ghi riêng).
+  if (Start > 1 && m1Now && !m1Prev[n] && !hieuSuatKickRoot[n]) {
     const snap = {
       ...buildPerfSnapshot(new Date()),
-      giay_tu_start: giay_m120_m1,     // D668 phút + D666 giây (thay giá trị tính ở server)
-      ap_suat_chan_khong: d_216_217,   // D216 — áp suất bắt đầu kick root
+      giay_tu_start: null,             // chờ D668/D666 (nhóm latch)
+      ap_suat_chan_khong: null,        // chờ D216/D217 (nhóm latch)
+      dong_dien_dong_co_root: null,    // chờ dải hợp lệ
+      dong_dien_dong_co_vong_nuoc: null, // chờ dải hợp lệ
     };
     hieuSuatKickRoot[n] = snap;
-    model
-      .updateOne({ _id: id_document[n] }, { $set: { "hieu_suat_may.kick_root": snap } })
-      .catch((err) => console.log(err));
-    dbg("nồi chiên " + n + " chụp hiệu suất kick root (M1)");
+    kickRootCycles[n] = 0;
+    kickRootPersisted[n] = false;
+    dbg("nồi chiên " + n + " chụp hiệu suất kick root (M1) vào RAM");
   }
   m1Prev[n] = m1Now;
 
-  // Retry kick_root dòng điện: mỗi cycle kiểm tra lại cho tới khi giá trị hợp lệ hoặc hết retry.
-  if (Start > 1 && hieuSuatKickRoot[n] && !kickRootLocked[n] && id_document[n]) {
-    kickRootRetries[n] = (kickRootRetries[n] || 0) + 1;
-    const dongDienRoot = dongDienRootMoiNhat[n];
-    const dongDienVongNuoc = dongDienVongNuocMoiNhat[n];
-    const rootOk = Number.isFinite(dongDienRoot) && dongDienRoot > 0 && dongDienRoot <= DONG_DIEN_MAX_REASONABLE;
-    const vongNuocOk = Number.isFinite(dongDienVongNuoc) && dongDienVongNuoc > 0 && dongDienVongNuoc <= DONG_DIEN_MAX_REASONABLE;
+  // --- Chốt các ô còn chờ của kick_root + persist MỘT write duy nhất mỗi cycle ---
+  // Mỗi ô chốt độc lập; cell Done chỉ set SAU KHI write thành công.
+  const m155Now = giai_doan_1 === true;
+  if (Start > 1 && hieuSuatKickRoot[n]) {
+    kickRootCycles[n] = (kickRootCycles[n] || 0) + 1;
+    // Window dòng điện: còn trong pha = M155 chưa lên. Hết window = cap hoặc qua pha.
+    const kickRootWindowOpen = !m155Now && kickRootCycles[n] <= DONG_DIEN_MAX_WAIT_CYCLES;
 
-    if (rootOk && vongNuocOk) {
-      hieuSuatKickRoot[n].dong_dien_dong_co_root = dongDienRoot;
-      hieuSuatKickRoot[n].dong_dien_dong_co_vong_nuoc = dongDienVongNuoc;
-      model
-        .updateOne({ _id: id_document[n] }, { $set: {
-          "hieu_suat_may.kick_root.dong_dien_dong_co_root": dongDienRoot,
-          "hieu_suat_may.kick_root.dong_dien_dong_co_vong_nuoc": dongDienVongNuoc,
-        }})
-        .catch((err) => console.log(err));
-      kickRootLocked[n] = true;
-      dbg("nồi chiên " + n + " cập nhật dòng điện (kick_root) cycle " + kickRootRetries[n] + ": root=" + dongDienRoot + " vòng nước=" + dongDienVongNuoc);
-    } else if (kickRootRetries[n] >= KICK_ROOT_MAX_RETRIES) {
-      kickRootLocked[n] = true;
-      dbg("nồi chiên " + n + " kick_root dòng điện: hết retry (" + KICK_ROOT_MAX_RETRIES + " cycles), giữ giá trị hiện tại");
+    // Ghi nhận trạng thái TRƯỚC cycle này để biết ô nào vừa mới chốt
+    const prevRootDone = !!kickRootRootDone[n];
+    const prevVongNuocDone = !!kickRootVongNuocDone[n];
+    const prevLatchDone = !!kickRootLatchDone[n];
+
+    // --- Dòng điện root ---
+    // Chỉ đánh giá khi giá trị CHƯA ổn định trong RAM (Settled bảo vệ khỏi ghi đè)
+    if (!kickRootRootSettled[n]) {
+      const v = dongDienRootMoiNhat[n];
+      if (dongDienHopLe(v)) {
+        hieuSuatKickRoot[n].dong_dien_dong_co_root = v;
+        kickRootRootSettled[n] = true;
+        kickRootRootDone[n] = true;
+      } else if (!kickRootWindowOpen) {
+        // Window đóng, chốt null (không thay thế bằng giá trị sai thời điểm)
+        hieuSuatKickRoot[n].dong_dien_dong_co_root = null;
+        kickRootRootSettled[n] = true;
+        kickRootRootDone[n] = true;
+      }
+    }
+
+    // --- Dòng điện vòng nước ---
+    if (!kickRootVongNuocSettled[n]) {
+      const v = dongDienVongNuocMoiNhat[n];
+      if (dongDienHopLe(v)) {
+        hieuSuatKickRoot[n].dong_dien_dong_co_vong_nuoc = v;
+        kickRootVongNuocSettled[n] = true;
+        kickRootVongNuocDone[n] = true;
+      } else if (!kickRootWindowOpen) {
+        hieuSuatKickRoot[n].dong_dien_dong_co_vong_nuoc = null;
+        kickRootVongNuocSettled[n] = true;
+        kickRootVongNuocDone[n] = true;
+      }
+    }
+
+    // --- Nhóm latch PLC (thời gian + áp suất): tối đa PLC_LATCH_MAX_READS lần ---
+    // Chỉ tăng bộ đếm khi giá trị CHƯA ổn định — write DB reject không tiêu hao budget.
+    if (!kickRootLatchSettled[n]) {
+      kickRootLatchReads[n] = (kickRootLatchReads[n] || 0) + 1;
+      if (nenChotLatchPlc(kickRootLatchReads[n], giay_m120_m1, d_216_217)) {
+        const coData = giay_m120_m1 !== 0 || d_216_217 !== 0;
+        hieuSuatKickRoot[n].giay_tu_start = coData ? giay_m120_m1 : null;
+        hieuSuatKickRoot[n].ap_suat_chan_khong = coData ? d_216_217 : null;
+        kickRootLatchSettled[n] = true;
+        kickRootLatchDone[n] = true;
+        if (!coData) dbg("nồi chiên " + n + " kick_root latch: hết " + PLC_LATCH_MAX_READS + " lần đọc vẫn 0 → chốt null");
+      }
+    }
+
+    // --- Persist: MỘT updateOne duy nhất cho row kick_root trong cycle này ---
+    // Ghi khi: (a) row chưa persist lần đầu, hoặc (b) có ô mới chốt trong cycle này,
+    // hoặc (c) có ô đã settled nhưng chưa persist (write trước đó fail).
+    const newlyLatchedRoot = !prevRootDone && !!kickRootRootDone[n];
+    const newlyLatchedVN = !prevVongNuocDone && !!kickRootVongNuocDone[n];
+    const newlyLatchedLatch = !prevLatchDone && !!kickRootLatchDone[n];
+    // Ô settled nhưng Done = false → write trước reject, cần retry
+    const retryRoot = !!kickRootRootSettled[n] && !kickRootRootDone[n];
+    const retryVN = !!kickRootVongNuocSettled[n] && !kickRootVongNuocDone[n];
+    const retryLatch = !!kickRootLatchSettled[n] && !kickRootLatchDone[n];
+    const hasNewCell = newlyLatchedRoot || newlyLatchedVN || newlyLatchedLatch;
+    const hasRetry = retryRoot || retryVN || retryLatch;
+    if (id_document[n] && (!kickRootPersisted[n] || hasNewCell || hasRetry)) {
+      try {
+        if (!kickRootPersisted[n]) {
+          // Lần đầu: ghi whole-object (row chưa tồn tại trong DB)
+          await model.updateOne(
+            { _id: id_document[n] },
+            { $set: { "hieu_suat_may.kick_root": hieuSuatKickRoot[n] } },
+          );
+          kickRootPersisted[n] = true;
+          // Whole-object ghi tất cả cells đã settled → đánh dấu Done cho chúng
+          if (kickRootRootSettled[n]) kickRootRootDone[n] = true;
+          if (kickRootVongNuocSettled[n]) kickRootVongNuocDone[n] = true;
+          if (kickRootLatchSettled[n]) kickRootLatchDone[n] = true;
+        } else {
+          // Đã persist rồi: chỉ ghi field-path cho các ô cần ghi (mới chốt hoặc retry)
+          const set = {};
+          if (newlyLatchedRoot || retryRoot) set["hieu_suat_may.kick_root.dong_dien_dong_co_root"] = hieuSuatKickRoot[n].dong_dien_dong_co_root;
+          if (newlyLatchedVN || retryVN) set["hieu_suat_may.kick_root.dong_dien_dong_co_vong_nuoc"] = hieuSuatKickRoot[n].dong_dien_dong_co_vong_nuoc;
+          if (newlyLatchedLatch || retryLatch) {
+            set["hieu_suat_may.kick_root.giay_tu_start"] = hieuSuatKickRoot[n].giay_tu_start;
+            set["hieu_suat_may.kick_root.ap_suat_chan_khong"] = hieuSuatKickRoot[n].ap_suat_chan_khong;
+          }
+          if (Object.keys(set).length > 0) {
+            await model.updateOne({ _id: id_document[n] }, { $set: set });
+          }
+          // Ghi thành công → mark Done cho các ô vừa ghi
+          if (newlyLatchedRoot || retryRoot) kickRootRootDone[n] = true;
+          if (newlyLatchedVN || retryVN) kickRootVongNuocDone[n] = true;
+          if (newlyLatchedLatch || retryLatch) kickRootLatchDone[n] = true;
+        }
+        dbg("nồi chiên " + n + " persist kick_root (cycle " + kickRootCycles[n] + ")");
+      } catch (err) {
+        // Write thất bại → rollback Done (để retry write cycle sau).
+        // KHÔNG rollback Settled — giá trị RAM đã xác định, không bao giờ bị ghi đè.
+        if (newlyLatchedRoot || retryRoot) kickRootRootDone[n] = false;
+        if (newlyLatchedVN || retryVN) kickRootVongNuocDone[n] = false;
+        if (newlyLatchedLatch || retryLatch) kickRootLatchDone[n] = false;
+        if (!kickRootPersisted[n]) {
+          // Row chưa ghi lần đầu → retry whole-object cycle sau
+        }
+        console.log(err);
+      }
     }
   }
 
   // --- M155 (vào Giai đoạn 1) rising edge → ghi số giây từ M120 start → vào GĐ1 + chụp hiệu suất (1 lần/mẻ) ---
-  const m155Now = giai_doan_1 === true;
   if (Start > 1 && m155Now && !m155Prev[n] && giayVaoGd1[n] == null && batchStartMs[n] != null) {
     giayVaoGd1[n] = Math.max(0, Math.round((Date.now() - batchStartMs[n]) / 1000));
   }
-  // Chụp hiệu suất nhúng hàng. PLC latch D672 (áp suất), D674/D676 (thời gian) tại sườn lên
-  // M155 nhưng có thể trễ vài chu kỳ scan → tại đúng cycle bắt sườn lên, D672 còn 0.
-  // Vì PLC GIỮ ba giá trị này suốt Giai đoạn 1 (chỉ reset khi sang GĐ2), ta chụp lại mỗi
-  // cycle khi M155 còn on cho tới khi áp suất khác 0 VÀ dòng điện hợp lệ thì KHÓA.
-  // Fallback: sau NHUNG_HANG_MAX_RETRIES cycle → khóa dù dòng điện chưa hợp lệ.
-  const nhHasAp = hieuSuatNhungHang[n] != null && Number(hieuSuatNhungHang[n].ap_suat_chan_khong) !== 0;
-  const nhDongDienOk = hieuSuatNhungHang[n] != null &&
-    hieuSuatNhungHang[n].dong_dien_dong_co_root <= DONG_DIEN_MAX_REASONABLE &&
-    hieuSuatNhungHang[n].dong_dien_dong_co_vong_nuoc <= DONG_DIEN_MAX_REASONABLE;
-  const nhExhausted = (nhungHangRetries[n] || 0) >= NHUNG_HANG_MAX_RETRIES;
-  const nhungHangLocked = nhHasAp && (nhDongDienOk || nhExhausted);
-  if (Start > 1 && m155Now && !nhungHangLocked && id_document[n]) {
-    nhungHangRetries[n] = (nhungHangRetries[n] || 0) + 1;
-    // Thời gian = M1→M155 (D676 phút + D674 giây), áp suất = D672 float. Đọc thẳng từ PLC.
+  // --- M155 sườn lên → chụp cảm biến vào RAM (BẤT KỂ id_document) ---
+  // Dòng điện (root + vòng nước) cũng qua cùng rule: (0,50] → chốt, ngoài → chờ.
+  if (Start > 1 && m155Now && !m155Prev[n] && !hieuSuatNhungHang[n]) {
     const snap = {
       ...buildPerfSnapshot(new Date()),
-      giay_tu_start: giay_m1_m155,     // D676 phút + D674 giây (kick root → hạ lồng)
-      ap_suat_chan_khong: d_672_673,   // D672 — áp suất khi bắt đầu nhúng lồng
+      giay_tu_start: null,             // chờ D676/D674 (nhóm latch)
+      ap_suat_chan_khong: null,        // chờ D672/D673 (nhóm latch)
+      dong_dien_dong_co_root: null,    // chờ dải hợp lệ
+      dong_dien_dong_co_vong_nuoc: null, // chờ dải hợp lệ
     };
     hieuSuatNhungHang[n] = snap;
-    model
-      .updateOne({ _id: id_document[n] }, { $set: { "hieu_suat_may.nhung_hang": snap } })
-      .catch((err) => console.log(err));
-    dbg(
-      "nồi chiên " + n + " chụp hiệu suất nhúng hàng (M155)" +
-        (Number(d_672_673) === 0
-          ? " — áp suất=0, đọc lại cycle sau"
-          : snap.dong_dien_dong_co_root > DONG_DIEN_MAX_REASONABLE || snap.dong_dien_dong_co_vong_nuoc > DONG_DIEN_MAX_REASONABLE
-            ? " — dòng điện quá độ (" + snap.dong_dien_dong_co_root + "/" + snap.dong_dien_dong_co_vong_nuoc + "), đọc lại cycle sau"
-            : " — đã chốt áp suất " + d_672_673),
-    );
+    nhungHangCycles[n] = 0;
+    nhungHangPersisted[n] = false;
+    dbg("nồi chiên " + n + " chụp hiệu suất nhúng hàng (M155) vào RAM");
+  }
+
+  // --- Chốt các ô còn chờ của nhung_hang + persist MỘT write duy nhất mỗi cycle ---
+  if (Start > 1 && hieuSuatNhungHang[n]) {
+    nhungHangCycles[n] = (nhungHangCycles[n] || 0) + 1;
+    // Window dòng điện: còn trong Stage 1 = giai_doan_1 còn true. Cap + rời pha → đóng.
+    const nhungHangWindowOpen = m155Now && nhungHangCycles[n] <= DONG_DIEN_MAX_WAIT_CYCLES;
+
+    // Ghi nhận trạng thái TRƯỚC cycle này
+    const prevNHRootDone = !!nhungHangRootDone[n];
+    const prevNHVongNuocDone = !!nhungHangVongNuocDone[n];
+    const prevNHLatchDone = !!nhungHangLatchDone[n];
+
+    // --- Dòng điện root ---
+    // Chỉ đánh giá khi giá trị CHƯA ổn định trong RAM (Settled bảo vệ khỏi ghi đè)
+    if (!nhungHangRootSettled[n]) {
+      const v = dongDienRootMoiNhat[n];
+      if (dongDienHopLe(v)) {
+        hieuSuatNhungHang[n].dong_dien_dong_co_root = v;
+        nhungHangRootSettled[n] = true;
+        nhungHangRootDone[n] = true;
+      } else if (!nhungHangWindowOpen) {
+        hieuSuatNhungHang[n].dong_dien_dong_co_root = null;
+        nhungHangRootSettled[n] = true;
+        nhungHangRootDone[n] = true;
+      }
+    }
+
+    // --- Dòng điện vòng nước ---
+    if (!nhungHangVongNuocSettled[n]) {
+      const v = dongDienVongNuocMoiNhat[n];
+      if (dongDienHopLe(v)) {
+        hieuSuatNhungHang[n].dong_dien_dong_co_vong_nuoc = v;
+        nhungHangVongNuocSettled[n] = true;
+        nhungHangVongNuocDone[n] = true;
+      } else if (!nhungHangWindowOpen) {
+        hieuSuatNhungHang[n].dong_dien_dong_co_vong_nuoc = null;
+        nhungHangVongNuocSettled[n] = true;
+        nhungHangVongNuocDone[n] = true;
+      }
+    }
+
+    // --- Nhóm latch PLC (thời gian + áp suất) ---
+    // Chỉ tăng bộ đếm khi giá trị CHƯA ổn định — write DB reject không tiêu hao budget.
+    if (!nhungHangLatchSettled[n]) {
+      nhungHangLatchReads[n] = (nhungHangLatchReads[n] || 0) + 1;
+      if (nenChotLatchPlc(nhungHangLatchReads[n], giay_m1_m155, d_672_673)) {
+        const coData = giay_m1_m155 !== 0 || d_672_673 !== 0;
+        hieuSuatNhungHang[n].giay_tu_start = coData ? giay_m1_m155 : null;
+        hieuSuatNhungHang[n].ap_suat_chan_khong = coData ? d_672_673 : null;
+        nhungHangLatchSettled[n] = true;
+        nhungHangLatchDone[n] = true;
+        if (!coData) dbg("nồi chiên " + n + " nhung_hang latch: hết " + PLC_LATCH_MAX_READS + " lần đọc vẫn 0 → chốt null");
+      }
+    }
+
+    // --- Persist: MỘT updateOne duy nhất cho row nhung_hang trong cycle này ---
+    const newlyNHRoot = !prevNHRootDone && !!nhungHangRootDone[n];
+    const newlyNHVN = !prevNHVongNuocDone && !!nhungHangVongNuocDone[n];
+    const newlyNHLatch = !prevNHLatchDone && !!nhungHangLatchDone[n];
+    // Ô settled nhưng Done = false → write trước reject, cần retry
+    const retryNHRoot = !!nhungHangRootSettled[n] && !nhungHangRootDone[n];
+    const retryNHVN = !!nhungHangVongNuocSettled[n] && !nhungHangVongNuocDone[n];
+    const retryNHLatch = !!nhungHangLatchSettled[n] && !nhungHangLatchDone[n];
+    const hasNewNHCell = newlyNHRoot || newlyNHVN || newlyNHLatch;
+    const hasNHRetry = retryNHRoot || retryNHVN || retryNHLatch;
+    if (id_document[n] && (!nhungHangPersisted[n] || hasNewNHCell || hasNHRetry)) {
+      try {
+        if (!nhungHangPersisted[n]) {
+          await model.updateOne(
+            { _id: id_document[n] },
+            { $set: { "hieu_suat_may.nhung_hang": hieuSuatNhungHang[n] } },
+          );
+          nhungHangPersisted[n] = true;
+          // Whole-object ghi tất cả cells đã settled → đánh dấu Done cho chúng
+          if (nhungHangRootSettled[n]) nhungHangRootDone[n] = true;
+          if (nhungHangVongNuocSettled[n]) nhungHangVongNuocDone[n] = true;
+          if (nhungHangLatchSettled[n]) nhungHangLatchDone[n] = true;
+        } else {
+          const set = {};
+          if (newlyNHRoot || retryNHRoot) set["hieu_suat_may.nhung_hang.dong_dien_dong_co_root"] = hieuSuatNhungHang[n].dong_dien_dong_co_root;
+          if (newlyNHVN || retryNHVN) set["hieu_suat_may.nhung_hang.dong_dien_dong_co_vong_nuoc"] = hieuSuatNhungHang[n].dong_dien_dong_co_vong_nuoc;
+          if (newlyNHLatch || retryNHLatch) {
+            set["hieu_suat_may.nhung_hang.giay_tu_start"] = hieuSuatNhungHang[n].giay_tu_start;
+            set["hieu_suat_may.nhung_hang.ap_suat_chan_khong"] = hieuSuatNhungHang[n].ap_suat_chan_khong;
+          }
+          if (Object.keys(set).length > 0) {
+            await model.updateOne({ _id: id_document[n] }, { $set: set });
+          }
+          // Ghi thành công → mark Done cho các ô vừa ghi
+          if (newlyNHRoot || retryNHRoot) nhungHangRootDone[n] = true;
+          if (newlyNHVN || retryNHVN) nhungHangVongNuocDone[n] = true;
+          if (newlyNHLatch || retryNHLatch) nhungHangLatchDone[n] = true;
+        }
+        dbg("nồi chiên " + n + " persist nhung_hang (cycle " + nhungHangCycles[n] + ")");
+      } catch (err) {
+        // Write thất bại → rollback Done (để retry write cycle sau).
+        // KHÔNG rollback Settled — giá trị RAM đã xác định, không bao giờ bị ghi đè.
+        if (newlyNHRoot || retryNHRoot) nhungHangRootDone[n] = false;
+        if (newlyNHVN || retryNHVN) nhungHangVongNuocDone[n] = false;
+        if (newlyNHLatch || retryNHLatch) nhungHangLatchDone[n] = false;
+        if (!nhungHangPersisted[n]) {
+          // Row chưa ghi lần đầu → retry whole-object cycle sau
+        }
+        console.log(err);
+      }
+    }
   }
   m155Prev[n] = m155Now;
 
@@ -611,9 +860,24 @@ exports.postDataPlc = async (
       m1Prev[n] = false;
       hieuSuatKickRoot[n] = null;
       hieuSuatNhungHang[n] = null;
-      nhungHangRetries[n] = 0;
-      kickRootRetries[n] = 0;
-      kickRootLocked[n] = false;
+      kickRootCycles[n] = 0;
+      kickRootLatchReads[n] = 0;
+      kickRootLatchSettled[n] = false;
+      kickRootLatchDone[n] = false;
+      kickRootRootSettled[n] = false;
+      kickRootRootDone[n] = false;
+      kickRootVongNuocSettled[n] = false;
+      kickRootVongNuocDone[n] = false;
+      kickRootPersisted[n] = false;
+      nhungHangCycles[n] = 0;
+      nhungHangLatchReads[n] = 0;
+      nhungHangLatchSettled[n] = false;
+      nhungHangLatchDone[n] = false;
+      nhungHangRootSettled[n] = false;
+      nhungHangRootDone[n] = false;
+      nhungHangVongNuocSettled[n] = false;
+      nhungHangVongNuocDone[n] = false;
+      nhungHangPersisted[n] = false;
       // Mốc bắt đầu mẻ để tính số giây từ M120 start → M6 on lần đầu
       batchStartMs[n] = batchStartedAt.getTime();
     }
