@@ -1,29 +1,16 @@
 {
-  "name": "getdata",
+  "name": "iot-gateway",
   "version": "1.0.0",
-  "description": "",
-  "main": "app.js",
+  "description": "IoT gateway monorepo: backend (Express + Socket.IO + Modbus) + frontend (React + Vite)",
+  "private": true,
   "scripts": {
-    "start": "nodemon app.js",
-    "start:prod": "node app.js",
-    "build:client": "npm --prefix client install && npm --prefix client run build",
+    "start": "npm --prefix backend run start",
+    "start:prod": "npm --prefix backend run start:prod",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build:client": "npm --prefix frontend install && npm --prefix frontend run build",
     "test": "node --experimental-strip-types --test"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
-  "dependencies": {
-    "body-parser": "^2.2.2",
-    "cors": "^2.8.6",
-    "dotenv": "^17.4.2",
-    "express": "^5.2.1",
-    "mcprotocol": "^0.1.2",
-    "modbus-serial": "^8.0.25",
-    "mongoose": "^9.6.3",
-    "socket.io": "^4.8.3",
-    "socket.io-client": "^4.8.3"
-  },
-  "devDependencies": {
-    "nodemon": "^3.1.14"
-  }
+  "license": "ISC"
 }

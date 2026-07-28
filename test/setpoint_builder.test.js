@@ -40,7 +40,7 @@ export function resolve(specifier, context, nextResolve) {
 }
 `));
 
-const MOD = path.join(__dirname, "..", "client", "src", "hooks", "setpointBuilder.ts");
+const MOD = path.join(__dirname, "..", "frontend", "src", "hooks", "setpointBuilder.ts");
 const { buildSetpointFromStage, buildBatchSetpointPoints, isLiveSetpointValid } = require(MOD);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

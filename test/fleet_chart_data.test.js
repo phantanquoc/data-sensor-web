@@ -6,7 +6,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
 
-const MOD = path.join(__dirname, "..", "client", "src", "components", "fleetChartData.ts");
+const MOD = path.join(__dirname, "..", "frontend", "src", "components", "fleetChartData.ts");
 const { buildGrid, valueAt, buildMerged, MAX_GRID_ROWS } = require(MOD);
 
 /** Series đơn giản: điểm mỗi `step` phút từ `from` đến `to`. */

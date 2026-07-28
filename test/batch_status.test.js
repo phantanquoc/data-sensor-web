@@ -8,7 +8,7 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 
 const { batchStatus, MIN_COMPLETED_MINUTES } = require(
-  path.join(__dirname, "..", "controller", "home.js"),
+  path.join(__dirname, "..", "backend", "controller", "home.js"),
 );
 
 const stopped = (ttc) => ({

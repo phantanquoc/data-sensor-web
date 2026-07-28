@@ -9,7 +9,7 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 
 const { countBatchStats } = require(
-  path.join(__dirname, "..", "controller", "home.js"),
+  path.join(__dirname, "..", "backend", "controller", "home.js"),
 );
 
 // Khoảng "hôm nay" = 25/07/2026 theo giờ VN (+07:00)

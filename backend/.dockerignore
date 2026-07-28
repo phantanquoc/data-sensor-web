@@ -1,13 +1,8 @@
 node_modules
 npm-debug.log
-.git
-.gitignore
 *.log
 Dockerfile
 .dockerignore
-docker-compose.yml
-client/node_modules
-client/dist
 
 # Secrets: compose injects .env at runtime via env_file, never bake into image
 .env

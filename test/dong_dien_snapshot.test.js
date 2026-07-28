@@ -20,7 +20,7 @@ const {
   nenChotDongDienRoot,
   nenChotLatchPlc,
   postDataPlc,
-} = require("../controller/post_data_plc");
+} = require("../backend/controller/post_data_plc");
 
 test("ngưỡng dòng điện là 50A, số lần đọc latch là 5, cap chờ dòng điện là 10 cycles", () => {
   assert.strictEqual(DONG_DIEN_MAX_REASONABLE, 50);

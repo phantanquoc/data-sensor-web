@@ -5,7 +5,7 @@ const {
   STALE_CYCLES_BEFORE_DROP,
   isCycleFresh,
   nextStaleState,
-} = require("../utils/modbus_health");
+} = require("../backend/utils/modbus_health");
 
 test("cycle không lỗi block nào thì tươi", () => {
   assert.equal(isCycleFresh([]), true);

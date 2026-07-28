@@ -8,7 +8,7 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 
 const { shouldResumeAsNewBatch } = require(
-  path.join(__dirname, "..", "controller", "post_data_plc.js"),
+  path.join(__dirname, "..", "backend", "controller", "post_data_plc.js"),
 );
 
 test("D60 reset to 0 from 90 → true (new batch)", () => {

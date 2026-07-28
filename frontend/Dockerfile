@@ -2,15 +2,15 @@
 # Không build ra dist — backend không serve FE nữa, mọi truy cập qua port 5174.
 FROM node:22-alpine
 
-WORKDIR /app/client
+WORKDIR /app
 
 # Cài dependency trước để tận dụng layer cache khi chỉ source thay đổi
-COPY client/package*.json ./
+COPY package*.json ./
 RUN npm ci
 
 # Source được mount qua volume trong docker-compose (HMR), COPY chỉ để
 # image chạy được độc lập khi không mount.
-COPY client/ ./
+COPY . ./
 
 EXPOSE 5174
 

@@ -1,5 +1,7 @@
 const ModbusRTU = require("modbus-serial");
-require("dotenv").config();
+const path = require("path");
+// .env ở gốc repo (backend/..) — chỉ định tường minh để chạy từ thư mục nào cũng đọc đúng.
+require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const DEBUG = process.env.DEBUG === "true" || process.env.DEBUG === "1";
 function dbg(...args) { if (DEBUG) console.log(...args); }

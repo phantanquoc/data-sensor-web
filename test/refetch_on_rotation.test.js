@@ -8,7 +8,7 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 
 const { REANCHOR_TOL_MS } = require(
-  path.join(__dirname, "..", "client", "src", "hooks", "batchRotation.ts"),
+  path.join(__dirname, "..", "frontend", "src", "hooks", "batchRotation.ts"),
 );
 
 const MIN_PHUT_GAP = 0.4;

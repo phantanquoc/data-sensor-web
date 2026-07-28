@@ -8,7 +8,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const APP = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
+const APP = fs.readFileSync(path.join(__dirname, "..", "backend", "app.js"), "utf8");
 
 function parseBlocks(constName) {
   const m = APP.match(new RegExp(`const ${constName} = \\[([\\s\\S]*?)\\n\\];`));
@@ -25,7 +25,7 @@ const configHolding = parseBlocks("CONFIG_HOLDING_BLOCKS");
 
 // Danh sách critical trong utils/modbus_health.js
 const CRITICAL = fs
-  .readFileSync(path.join(__dirname, "..", "utils", "modbus_health.js"), "utf8")
+  .readFileSync(path.join(__dirname, "..", "backend", "utils", "modbus_health.js"), "utf8")
   .match(/new Set\(\[([^\]]*)\]\)/)[1]
   .match(/"([^"]+)"/g)
   .map((s) => s.replace(/"/g, ""));

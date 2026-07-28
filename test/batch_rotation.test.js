@@ -5,7 +5,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
 
-const MOD = path.join(__dirname, "..", "client", "src", "hooks", "batchRotation.ts");
+const MOD = path.join(__dirname, "..", "frontend", "src", "hooks", "batchRotation.ts");
 const { decideRotation, REANCHOR_TOL_MS } = require(MOD);
 
 const T0 = Date.UTC(2026, 6, 27, 5, 0, 0);

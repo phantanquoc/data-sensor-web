@@ -9,7 +9,7 @@ services:
     restart: unless-stopped
 
   iot-gateway:
-    build: .
+    build: ./backend
     container_name: iot_gateway
     ports:
       - "3000:3000"
@@ -26,8 +26,7 @@ services:
 
   iot-frontend:
     build:
-      context: .
-      dockerfile: Dockerfile.frontend
+      context: ./frontend
     container_name: iot_frontend
     ports:
       - "5174:5174"
@@ -36,11 +35,11 @@ services:
       - BACKEND_URL=http://iot-gateway:3000
     volumes:
       # Mount source để sửa code là HMR cập nhật ngay, không cần rebuild
-      - ./client/src:/app/client/src
-      - ./client/index.html:/app/client/index.html
-      - ./client/vite.config.ts:/app/client/vite.config.ts
-      - ./client/tailwind.config.js:/app/client/tailwind.config.js
-      - ./client/postcss.config.js:/app/client/postcss.config.js
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
+      - ./frontend/vite.config.ts:/app/vite.config.ts
+      - ./frontend/tailwind.config.js:/app/tailwind.config.js
+      - ./frontend/postcss.config.js:/app/postcss.config.js
     depends_on:
       - iot-gateway
     restart: unless-stopped

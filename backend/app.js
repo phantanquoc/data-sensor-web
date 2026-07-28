@@ -7,7 +7,8 @@ app.use(cors());
 const path = require("path");
 const fs = require("fs");
 const { formatVietnamTimestamp } = require("./utils/time");
-require("dotenv").config();
+// .env nằm ở gốc repo (backend/..) — chỉ định tường minh để đọc đúng dù chạy từ thư mục nào.
+require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const DEBUG = process.env.DEBUG === "true" || process.env.DEBUG === "1";
 function dbg(...args) { if (DEBUG) console.log(...args); }
@@ -16,8 +17,8 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Backend chỉ phục vụ API + Socket.IO. Frontend là service riêng (Vite, port 5174).
-// Vẫn serve client/dist nếu có sẵn — để chạy được độc lập khi không dùng Docker.
-const SPA_DIR = path.join(__dirname, "client", "dist");
+// Vẫn serve frontend/dist nếu có sẵn — để chạy được độc lập khi không dùng Docker.
+const SPA_DIR = path.join(__dirname, "..", "frontend", "dist");
 app.use(express.static(SPA_DIR));
 
 app.post("/enable_machine", (req, res, next) => {

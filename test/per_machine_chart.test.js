@@ -17,7 +17,7 @@ const path = require("node:path");
 
 // ─── Import hàm thật (machineList.ts thuần, require() được bằng Node) ─────────
 const { sanitizeMachineList, machineListKey } = require(
-  path.join(__dirname, "..", "client", "src", "hooks", "machineList.ts"),
+  path.join(__dirname, "..", "frontend", "src", "hooks", "machineList.ts"),
 );
 
 // ─── 1. Machine-list sanitizer ─────────────────────────────────────────────────
