@@ -2,9 +2,9 @@
  * Quyết định "máy này vừa sang mẻ mới chưa?" — tách khỏi useFleetHistory để test
  * được không cần React/socket.
  *
- * Quy tắc nghiệp vụ: chỉ cần MỘT máy bắt đầu mẻ mới là máy đó tạo biểu đồ mẻ
- * mới, còn biểu đồ đang có của nó tụt xuống tab "Mẻ trước". Các máy khác không
- * bị ảnh hưởng — vì vậy hai mẻ chạy song song trên hai tab là bình thường.
+ * Hàm này chỉ trả lời cho MỘT máy: "máy này vừa sang mẻ mới chưa?". Việc gộp
+ * theo THẾ HỆ cả dàn (chỉ cần một máy sang mẻ mới là các máy chưa sang tụt xuống
+ * "Mẻ trước") nằm ở useFleetHistory — xem genRef/fleetGenRef ở đó.
  */
 
 export interface RotationInput {

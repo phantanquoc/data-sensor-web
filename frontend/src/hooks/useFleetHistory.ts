@@ -15,8 +15,13 @@
  *  - X values use only backend-generated timestamps.
  *  - Initialization gate: socket data is ignored until REST load completes for
  *    each machine, preventing desync of batchStart when socket fires before REST.
- *  - Dual-batch: tracks both the latest and previous batch per machine so the
- *    Overview can toggle between the current and the preceding batch.
+ *  - Generational batches (fleet-wide): "Mẻ mới nhất" và "Mẻ trước" là hai THẾ
+ *    HỆ mẻ của cả dàn, không phải mẻ-đang-chạy của từng máy. Chỉ cần MỘT máy
+ *    sang mẻ mới là cả dàn sang thế hệ mới: máy đó vẽ ở "Mẻ mới nhất", còn các
+ *    máy chưa kịp sang (dù vẫn đang chạy mẻ cũ) tụt xuống "Mẻ trước" để vẽ tiếp.
+ *    Nhờ vậy "Mẻ mới nhất" chỉ chứa các máy đã qua mẻ mới, không trộn hai mẻ.
+ *    Mỗi máy giữ genRef (số lần sang thế hệ mới trong phiên); fleetGenRef là
+ *    thế hệ cao nhất cả dàn đạt tới. pushState định tuyến series theo gen.
  *  - Stable key derivation: the tracked machine list is sanitized and turned
  *    into a primitive string key for the effect dependency array, preventing
  *    infinite re-runs when the caller passes a fresh array literal each render.
@@ -79,6 +84,15 @@ export const FRYER_CHART_COLORS: Record<number, string> = {
 
 const MAX_POINTS = 300;
 const MIN_PHUT_GAP = 0.4; // ~24 seconds minimum gap between live appended points
+
+/**
+ * Cửa sổ gom mẻ về cùng MỘT thế hệ khi mở trang. 8 máy do cùng người vận hành
+ * bấm chạy nên các mẻ cùng thế hệ khởi động cách nhau ít phút; hai thế hệ liên
+ * tiếp cách nhau ~1 chu kỳ (mẻ chạy ~80 phút). 30 phút nằm gọn giữa hai khoảng
+ * đó: đủ rộng để không tách nhầm stagger trong cùng thế hệ, đủ hẹp để không gộp
+ * nhầm hai thế hệ.
+ */
+const GEN_WINDOW_MS = 30 * 60 * 1000;
 
 /**
  * Nạp lại mẻ mới: backend chỉ $push 1 điểm mỗi 5 cycle, nên điểm gd1 đầu tiên
@@ -266,10 +280,25 @@ export function useFleetHistory(machines?: number[]): FleetHistoryState {
   const prevApPtsRef = useRef<Record<number, ChartPoint[]>>({});
   const prevSpPtsRef = useRef<Record<number, ChartPoint[]>>({});
 
+  // --- Generational tracking (fleet-wide) ---
+  /** Thế hệ mẻ của từng máy (số lần sang mẻ mới trong phiên). */
+  const genRef = useRef<Record<number, number>>({});
+  /** Thế hệ cao nhất cả dàn đã đạt tới. Máy có gen < fleetGen là "Mẻ trước". */
+  const fleetGenRef = useRef<number>(0);
+
   // --- Initialization gate ---
   const initializedRef = useRef<Record<number, boolean>>({});
 
-  /** Rebuild React state from refs — only emits series for tracked machines. */
+  /**
+   * Rebuild React state from refs — only emits series for tracked machines.
+   *
+   * Định tuyến theo THẾ HỆ, không theo máy:
+   *  - Máy đã bắt kịp thế hệ mới nhất (gen >= fleetGen): mẻ đang chạy của nó vào
+   *    "Mẻ mới nhất", mẻ đã hoàn thành trước đó của nó vào "Mẻ trước".
+   *  - Máy còn ở thế hệ cũ (gen < fleetGen): mẻ đang chạy của nó (nằm ở latest*Ref)
+   *    thuộc THẾ HỆ TRƯỚC → đẩy xuống "Mẻ trước", không hiện gì ở "Mẻ mới nhất".
+   * Nhờ vậy "Mẻ mới nhất" chỉ gồm các máy đã qua mẻ mới.
+   */
   const pushState = (tracked: number[]) => {
     const latestTemp: MachineSeries[] = [];
     const latestAp: MachineSeries[] = [];
@@ -278,31 +307,28 @@ export function useFleetHistory(machines?: number[]): FleetHistoryState {
     const prevAp: MachineSeries[] = [];
     const prevSp: MachineSeries[] = [];
 
-    for (const n of tracked) {
-      const lt = latestTempPtsRef.current[n];
-      const la = latestApPtsRef.current[n];
-      const lsp = latestSpPtsRef.current[n];
-      const pt = prevTempPtsRef.current[n];
-      const pa = prevApPtsRef.current[n];
-      const psp = prevSpPtsRef.current[n];
+    const fleetGen = fleetGenRef.current;
 
-      if (lt && lt.length > 0) {
-        latestTemp.push({ n, color: FRYER_CHART_COLORS[n], points: [...lt] });
-      }
-      if (la && la.length > 0) {
-        latestAp.push({ n, color: FRYER_CHART_COLORS[n], points: [...la] });
-      }
-      if (lsp && lsp.length > 0) {
-        latestSp.push({ n, color: FRYER_CHART_COLORS[n], points: [...lsp] });
-      }
-      if (pt && pt.length > 0) {
-        prevTemp.push({ n, color: FRYER_CHART_COLORS[n], points: [...pt] });
-      }
-      if (pa && pa.length > 0) {
-        prevAp.push({ n, color: FRYER_CHART_COLORS[n], points: [...pa] });
-      }
-      if (psp && psp.length > 0) {
-        prevSp.push({ n, color: FRYER_CHART_COLORS[n], points: [...psp] });
+    const pushSeries = (arr: MachineSeries[], n: number, pts: ChartPoint[] | undefined) => {
+      if (pts && pts.length > 0) arr.push({ n, color: FRYER_CHART_COLORS[n], points: [...pts] });
+    };
+
+    for (const n of tracked) {
+      const caughtUp = (genRef.current[n] ?? 0) >= fleetGen;
+
+      if (caughtUp) {
+        // Máy thuộc thế hệ mới nhất: mẻ đang chạy → latest, mẻ cũ → previous.
+        pushSeries(latestTemp, n, latestTempPtsRef.current[n]);
+        pushSeries(latestAp, n, latestApPtsRef.current[n]);
+        pushSeries(latestSp, n, latestSpPtsRef.current[n]);
+        pushSeries(prevTemp, n, prevTempPtsRef.current[n]);
+        pushSeries(prevAp, n, prevApPtsRef.current[n]);
+        pushSeries(prevSp, n, prevSpPtsRef.current[n]);
+      } else {
+        // Máy còn ở thế hệ trước: mẻ đang chạy của nó chính là "Mẻ trước".
+        pushSeries(prevTemp, n, latestTempPtsRef.current[n]);
+        pushSeries(prevAp, n, latestApPtsRef.current[n]);
+        pushSeries(prevSp, n, latestSpPtsRef.current[n]);
       }
     }
 
@@ -335,7 +361,9 @@ export function useFleetHistory(machines?: number[]): FleetHistoryState {
       delete prevSpPtsRef.current[n];
       delete initializedRef.current[n];
       revisionRef.current[n] = 0;
+      genRef.current[n] = 0;
     }
+    fleetGenRef.current = 0;
     // Xoá state React ngay để UI không hiện dữ liệu máy cũ trong lúc REST load.
     setState({
       latest: { tempSeries: [], apSeries: [], setpointSeries: [] },
@@ -460,6 +488,33 @@ export function useFleetHistory(machines?: number[]): FleetHistoryState {
         initializedRef.current[n] = true;
       });
 
+      // --- Gán thế hệ ban đầu theo mốc bắt đầu mẻ đang chạy ---
+      // Mở trang giữa lúc dàn máy đang so le đổi mẻ: máy đã sang mẻ mới có mốc
+      // bắt đầu gần đây, máy chưa sang còn giữ mốc cũ hơn ~1 chu kỳ. Gom theo
+      // GEN_WINDOW_MS để "Mẻ mới nhất" chỉ chứa nhóm mới, nhóm cũ nằm "Mẻ trước".
+      // Không hạ thấp thế hệ mà tick live đã nâng trong lúc request còn bay.
+      let maxStart = -Infinity;
+      for (const n of tracked) {
+        const s = latestBatchStartRef.current[n];
+        if (s != null && s > maxStart) maxStart = s;
+      }
+      if (Number.isFinite(maxStart)) {
+        let hasBehind = false;
+        for (const n of tracked) {
+          const s = latestBatchStartRef.current[n];
+          if (s != null && s < maxStart - GEN_WINDOW_MS) hasBehind = true;
+        }
+        if (hasBehind) {
+          fleetGenRef.current = Math.max(fleetGenRef.current, 1);
+          for (const n of tracked) {
+            const s = latestBatchStartRef.current[n];
+            // Máy mới nhất trong dàn → thế hệ hiện tại (1); máy tụt lại → 0.
+            const clusterGen = s != null && s >= maxStart - GEN_WINDOW_MS ? 1 : 0;
+            genRef.current[n] = Math.max(genRef.current[n] ?? 0, clusterGen);
+          }
+        }
+      }
+
       if (!cancelled) pushState(tracked);
     };
 
@@ -502,9 +557,10 @@ export function useFleetHistory(machines?: number[]): FleetHistoryState {
         });
 
         if (startsNewBatch) {
-          // Một máy sang mẻ mới → mẻ hiện tại CỦA MÁY ĐÓ tụt xuống "Mẻ trước",
-          // các máy khác không bị ảnh hưởng. Hai mẻ do đó chạy song song trên
-          // hai tab của biểu đồ.
+          // Một máy sang mẻ mới → cả dàn sang THẾ HỆ mới. Mẻ hiện tại của máy đó
+          // tụt xuống "Mẻ trước", và vì fleetGen tăng, các máy chưa kịp sang mẻ
+          // mới cũng lập tức bị pushState đẩy khỏi "Mẻ mới nhất" xuống "Mẻ trước"
+          // (dù vẫn đang chạy) — nên "Mẻ mới nhất" chỉ còn máy đã qua mẻ mới.
           //
           // Trước đây bước này bị chặn bởi !firstTick, nên mẻ vừa tải bằng REST
           // bị xoá trắng mà không sang được "Mẻ trước" nếu tick live ĐẦU TIÊN
@@ -519,6 +575,12 @@ export function useFleetHistory(machines?: number[]): FleetHistoryState {
             prevTempPtsRef.current[machineN] = curLatestTemp ?? [];
             prevApPtsRef.current[machineN] = curLatestAp ?? [];
             prevSpPtsRef.current[machineN] = curLatestSp ?? [];
+
+            // Máy này thực sự sang mẻ mới (có mẻ cũ để đẩy xuống) → nâng thế hệ.
+            // Nếu là mốc đầu tiên (chưa có mẻ nào để đẩy) thì KHÔNG nâng, tránh
+            // kéo tụt cả dàn xuống "Mẻ trước" chỉ vì một máy vừa khởi động.
+            genRef.current[machineN] = (genRef.current[machineN] ?? 0) + 1;
+            fleetGenRef.current = Math.max(fleetGenRef.current, genRef.current[machineN]);
           }
 
           revisionRef.current[machineN] = (revisionRef.current[machineN] ?? 0) + 1;
