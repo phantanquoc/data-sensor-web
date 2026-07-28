@@ -21,6 +21,7 @@ import {
 import type { MachineSeries } from '../hooks/useFleetHistory';
 import { useTheme } from '../hooks/useTheme';
 import { buildMerged } from './fleetChartData';
+import { TEMPERATURE_WARNING_DELTA } from '../constants';
 
 interface FleetLineChartProps {
   /** Chart title displayed above the chart */
@@ -31,6 +32,10 @@ interface FleetLineChartProps {
   latestSeries: MachineSeries[];
   /** Previous batch series data */
   previousSeries: MachineSeries[];
+  /** Optional setpoint series for latest batch (dashed step line) */
+  latestSetpointSeries?: MachineSeries[];
+  /** Optional setpoint series for previous batch (dashed step line) */
+  previousSetpointSeries?: MachineSeries[];
 }
 
 /* --- Custom Tooltip -------------------------------------------------------- */
@@ -48,22 +53,43 @@ interface CustomTooltipProps {
   payload?: TooltipPayloadItem[];
   label?: number;
   unit: string;
+  /** Whether this chart has setpoint lines (enables deviation display) */
+  hasSetpoint?: boolean;
 }
 
-const CustomTooltip: React.FC<CustomTooltipProps> = ({ active, payload, label, unit }) => {
+const CustomTooltip: React.FC<CustomTooltipProps> = ({ active, payload, label, unit, hasSetpoint }) => {
   if (!active || !payload || payload.length === 0) return null;
 
   const visible = payload.filter((item) => item.value != null);
   if (visible.length === 0) return null;
+
+  // Separate measured lines (m*) from setpoint lines (s*)
+  const measured = visible.filter((item) => item.dataKey.startsWith('m'));
+  const setpoints = visible.filter((item) => item.dataKey.startsWith('s'));
+
+  // Build a lookup: machine number → setpoint value at this X
+  const spLookup: Record<string, number> = {};
+  for (const sp of setpoints) {
+    // dataKey is `s${n}`, extract n
+    const n = sp.dataKey.slice(1);
+    if (typeof sp.value === 'number') spLookup[n] = sp.value;
+  }
 
   return (
     <div className="rounded-xl border border-border bg-surface-raised px-4 py-3 shadow-card text-sm">
       <p className="mb-2 font-semibold text-text-primary">
         Phút: <span className="text-val-blue">{typeof label === 'number' ? label.toFixed(1) : '--'}</span>
       </p>
-      {visible.map((item) => {
+      {measured.map((item) => {
         const stage = item.payload?.[`${item.dataKey}_stage`] ?? '?';
         const displayVal = typeof item.value === 'number' ? item.value.toFixed(1) : '--';
+        // Extract machine number from `m${n}` dataKey
+        const machineN = item.dataKey.slice(1);
+        const spVal = spLookup[machineN];
+        const deviation = hasSetpoint && typeof item.value === 'number' && spVal != null
+          ? item.value - spVal
+          : null;
+        const deviationWarn = deviation != null && Math.abs(deviation) >= TEMPERATURE_WARNING_DELTA;
         return (
           <div key={item.name} className="flex items-center gap-2 py-0.5">
             <span
@@ -80,9 +106,38 @@ const CustomTooltip: React.FC<CustomTooltipProps> = ({ active, payload, label, u
               {displayVal}
               <span className="ml-0.5 text-xs font-normal text-text-secondary">{unit}</span>
             </span>
+            {deviation != null && (
+              <>
+                <span className="mx-1 text-text-muted">·</span>
+                <span className={`text-xs font-semibold ${deviationWarn ? 'text-val-red' : 'text-text-muted'}`}>
+                  {deviation >= 0 ? '+' : ''}{deviation.toFixed(1)}
+                </span>
+              </>
+            )}
           </div>
         );
       })}
+      {hasSetpoint && setpoints.length > 0 && (
+        <div className="mt-1 border-t border-border pt-1">
+          {setpoints.map((sp) => {
+            const displayVal = typeof sp.value === 'number' ? sp.value.toFixed(1) : '--';
+            return (
+              <div key={sp.dataKey} className="flex items-center gap-2 py-0.5">
+                <span
+                  className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-sm border border-text-muted"
+                  style={{ background: 'transparent', borderStyle: 'dashed' }}
+                />
+                <span className="text-text-secondary">{sp.name}</span>
+                <span className="mx-1 text-text-muted">·</span>
+                <span className="font-bold text-text-primary">
+                  {displayVal}
+                  <span className="ml-0.5 text-xs font-normal text-text-secondary">{unit}</span>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };
@@ -139,8 +194,8 @@ const buildYScale = (
 /* --- Chart chrome colors by theme ----------------------------------------- */
 
 const CHART_CHROME = {
-  dark: { grid: '#2a3f52', tick: '#94a3b8', label: '#64748b', gridOpacity: 0.25 },
-  light: { grid: '#e2e8f0', tick: '#475569', label: '#64748b', gridOpacity: 1 },
+  dark: { grid: '#2a3f52', tick: '#94a3b8', label: '#64748b', gridOpacity: 0.25, setpoint: '#64748b' },
+  light: { grid: '#e2e8f0', tick: '#475569', label: '#64748b', gridOpacity: 1, setpoint: '#94a3b8' },
 } as const;
 
 /* --- Main chart ------------------------------------------------------------ */
@@ -150,18 +205,22 @@ export const FleetLineChart: React.FC<FleetLineChartProps> = ({
   unit,
   latestSeries,
   previousSeries,
+  latestSetpointSeries,
+  previousSetpointSeries,
 }) => {
   const [view, setView] = useState<ViewMode>('latest');
   const { theme } = useTheme();
   const chrome = CHART_CHROME[theme];
   const activeSeries = view === 'latest' ? latestSeries : previousSeries;
+  const activeSetpoint = view === 'latest' ? latestSetpointSeries : previousSetpointSeries;
   const hasPrevious = previousSeries.length > 0;
+  const hasSetpoint = (activeSetpoint?.length ?? 0) > 0;
 
   // Build merged chart-level data array with per-machine columns.
   // NOTE: this hook must run unconditionally on every render (Rules of Hooks),
   // so it is placed BEFORE the empty-state early return and short-circuits
   // internally when there is no active series.
-  const { merged, xMax, presentMachines, yScale } = useMemo(() => {
+  const { merged, xMax, presentMachines, yScale, setpointMachines } = useMemo(() => {
     const emptyScale = { domain: [0, 1] as [number, number], ticks: [0, 1] };
     if (activeSeries.length === 0) {
       return {
@@ -169,18 +228,22 @@ export const FleetLineChart: React.FC<FleetLineChartProps> = ({
         xMax: 0,
         presentMachines: [] as Array<{ n: number; color: string; pointCount: number }>,
         yScale: emptyScale,
+        setpointMachines: [] as Array<{ n: number; color: string; pointCount: number }>,
       };
     }
 
-    const { rows, xMax: max, vMin, vMax, machines } = buildMerged(activeSeries);
+    const { rows, xMax: max, vMin, vMax, machines, setpointMachines: spMachines } = buildMerged(
+      activeSeries,
+      hasSetpoint ? activeSetpoint : undefined,
+    );
     const yScale = buildYScale(vMin, vMax);
 
     if (rows.length === 0) {
-      return { merged: [{ phut: 0 }], xMax: 0, presentMachines: machines, yScale };
+      return { merged: [{ phut: 0 }], xMax: 0, presentMachines: machines, yScale, setpointMachines: spMachines ?? [] };
     }
 
-    return { merged: rows, xMax: max, presentMachines: machines, yScale };
-  }, [activeSeries]);
+    return { merged: rows, xMax: max, presentMachines: machines, yScale, setpointMachines: spMachines ?? [] };
+  }, [activeSeries, activeSetpoint, hasSetpoint]);
 
   // Empty state (rendered AFTER all hooks have run)
   if (activeSeries.length === 0) {
@@ -238,7 +301,7 @@ export const FleetLineChart: React.FC<FleetLineChartProps> = ({
             tickFormatter={(v: number) => v.toFixed(0)}
             width={40}
           />
-          <Tooltip content={<CustomTooltip unit={unit} />} />
+          <Tooltip content={<CustomTooltip unit={unit} hasSetpoint={hasSetpoint} />} />
           <Legend
             formatter={(value: string) => (
               <span className="text-xs text-text-secondary">{value}</span>
@@ -258,6 +321,21 @@ export const FleetLineChart: React.FC<FleetLineChartProps> = ({
               isAnimationActive={false}
               type="monotone"
               connectNulls={false}
+            />
+          ))}
+          {setpointMachines.map((s) => (
+            <Line
+              key={`sp-${s.n}`}
+              name="Nhiệt độ cài đặt"
+              dataKey={`s${s.n}`}
+              stroke={chrome.setpoint}
+              strokeWidth={1.5}
+              strokeDasharray="6 3"
+              dot={false}
+              activeDot={false}
+              isAnimationActive={false}
+              type="stepAfter"
+              connectNulls
             />
           ))}
         </LineChart>

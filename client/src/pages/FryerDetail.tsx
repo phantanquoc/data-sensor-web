@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Activity } from 'lucide-react';
 import { TabBar } from '../components/TabBar';
@@ -7,9 +7,11 @@ import { SensorGrid } from '../components/SensorGrid';
 import { BatchList } from '../components/BatchList';
 import { StatsBar } from '../components/StatsBar';
 import { BatchDetailDrawer } from '../components/BatchDetailDrawer';
+import { FleetLineChart } from '../components/FleetLineChart';
 import { Toast } from '../components/Toast';
 import { useSocket } from '../hooks/useSocket';
 import { useFryerData } from '../hooks/useFryerData';
+import { useFleetHistory } from '../hooks/useFleetHistory';
 import { getNoiChien, getNoiChienDetail, suaNoiChienDetail, xoaNoiChienDetail } from '../api';
 import type { StagePayload, SensorData, SetGiaiDoanStages123 } from '../types';
 import type { Period } from '../hooks/useThongKe';
@@ -65,6 +67,10 @@ export const FryerDetail: React.FC = () => {
     handleDataEvent,
     autoLoad,
   } = useFryerData();
+
+  // Biểu đồ xu hướng mẻ hiện tại — chỉ theo dõi máy đang xem
+  const chartMachines = useMemo(() => [Number(soNoiChien)], [soNoiChien]);
+  const { latest, previous } = useFleetHistory(chartMachines);
 
   const onData = useCallback((stagesArr: StagePayload[], stageElapsedMs?: number | null, elapsedAgeMs?: number) => {
     handleDataEvent(stagesArr, stageElapsedMs, elapsedAgeMs);
@@ -196,6 +202,29 @@ export const FryerDetail: React.FC = () => {
                 may={Number(soNoiChien)}
               />
             </div>
+
+            <section aria-label="Biểu đồ xu hướng mẻ hiện tại" className="mb-4">
+              <div className="mb-3 flex items-center gap-2">
+                <Activity size={16} className="text-brand" aria-hidden="true" />
+                <h3 className="text-sm font-semibold text-text-primary">Xu hướng theo mẻ hiện tại</h3>
+              </div>
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <FleetLineChart
+                  title="Nhiệt độ"
+                  unit="°C"
+                  latestSeries={latest.tempSeries}
+                  previousSeries={previous.tempSeries}
+                  latestSetpointSeries={latest.setpointSeries}
+                  previousSetpointSeries={previous.setpointSeries}
+                />
+                <FleetLineChart
+                  title="Áp chân không"
+                  unit="bar"
+                  latestSeries={latest.apSeries}
+                  previousSeries={previous.apSeries}
+                />
+              </div>
+            </section>
 
             <div className={styles.detailCardsRow}>
               {stages.map((stage, idx) => (

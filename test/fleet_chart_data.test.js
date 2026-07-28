@@ -141,3 +141,97 @@ test("vMin/vMax bao trùm mọi hệ để thang Y không cắt mất đường"
   assert.equal(vMin, 50);
   assert.equal(vMax, 120);
 });
+
+// ---- Setpoint series (nhóm thứ hai) ------------------------------------------
+
+const { findExactOrLastBefore } = require(MOD);
+
+test("setpoint cột s${n} không ghi đè measured cột m${n} — cả hai giá trị song song", () => {
+  // Một máy (n=1) có cả measured và setpoint tại cùng mốc X.
+  // Key "m1" (measured) và "s1" (setpoint) phải cùng tồn tại trên row.
+  const measured = { n: 1, color: "#a", points: [
+    { phut: 0, value: 35, stage: 1 },
+    { phut: 5, value: 40, stage: 1 },
+  ] };
+  const setpoint = { n: 1, color: "#b", points: [
+    { phut: 0, value: 90, stage: 1 },
+    { phut: 5, value: 88, stage: 2 },
+  ] };
+  const { rows } = buildMerged([measured], [setpoint]);
+  // Tại phut 0 cả hai phải có giá trị
+  const row0 = rows.find((r) => r.phut === 0);
+  assert.ok(row0, "phải có row ở phut 0");
+  assert.equal(row0.m1, 35, "measured giá trị 35");
+  assert.equal(row0.s1, 90, "setpoint giá trị 90");
+  // Tại phut 5 cả hai phải có giá trị
+  const row5 = rows.find((r) => r.phut === 5);
+  assert.ok(row5, "phải có row ở phut 5");
+  assert.equal(row5.m1, 40, "measured giá trị 40");
+  assert.equal(row5.s1, 88, "setpoint giá trị 88");
+});
+
+test("vMin/vMax bao trùm cả setpoint — measured thấp + setpoint cao phải mở rộng range", () => {
+  // Measured 25-40, setpoint 90 → range phải chứa 90
+  const measured = mkSeries(1, 0, 5, 1, 30);
+  const setpoint = { n: 1, color: "#b", points: [
+    { phut: 0, value: 90, stage: 1 },
+    { phut: 5, value: 90, stage: 1 },
+  ] };
+  const { vMin, vMax } = buildMerged([measured], [setpoint]);
+  assert.ok(vMin <= 30, `vMin phải <= 30, nhận ${vMin}`);
+  assert.ok(vMax >= 90, `vMax phải >= 90, nhận ${vMax}`);
+});
+
+test("grid là hợp mốc X của cả measured và setpoint — mốc chỉ setpoint vẫn có row", () => {
+  // Measured có phut 0 và 10; setpoint có phut 0, 5, 10.
+  // Grid phải chứa phut 5 (mốc chỉ có ở setpoint).
+  const measured = { n: 1, color: "#a", points: [
+    { phut: 0, value: 30, stage: 1 },
+    { phut: 10, value: 40, stage: 1 },
+  ] };
+  const setpoint = { n: 1, color: "#b", points: [
+    { phut: 0, value: 90, stage: 1 },
+    { phut: 5, value: 88, stage: 2 },
+    { phut: 10, value: 88, stage: 2 },
+  ] };
+  const { rows } = buildMerged([measured], [setpoint]);
+  const phuts = rows.map((r) => r.phut);
+  assert.ok(phuts.includes(5), "mốc phut=5 (chỉ setpoint) phải có trong grid");
+  // Measured ở phut 5 phải được nội suy (nằm trong khoảng 0-10)
+  const row5 = rows.find((r) => r.phut === 5);
+  assert.ok(row5.m1 != null, "measured phải được nội suy tại mốc setpoint");
+});
+
+test("không truyền setpointSeries → output giống hệt phiên bản cũ (backward-compat)", () => {
+  const a = mkSeries(1, 0, 10, 2, 80);
+  const b = mkSeries(2, 0, 10, 2, 90);
+  const withSp = buildMerged([a, b], undefined);
+  const withoutSp = buildMerged([a, b]);
+  // Rows, xMax, vMin, vMax, machines phải giống nhau
+  assert.deepEqual(withSp.rows, withoutSp.rows);
+  assert.equal(withSp.xMax, withoutSp.xMax);
+  assert.equal(withSp.vMin, withoutSp.vMin);
+  assert.equal(withSp.vMax, withoutSp.vMax);
+  assert.deepEqual(withSp.machines, withoutSp.machines);
+  // Không có setpointMachines khi không truyền
+  assert.equal(withoutSp.setpointMachines, undefined);
+});
+
+test("setpoint kết thúc sớm hơn measured → null ở các mốc sau mốc cuối setpoint", () => {
+  // Setpoint chỉ covers phut 0-5 (stage 1-3 xong ở phut 5).
+  // Measured tiếp tục đến phut 10 (stage 4).
+  const measured = { n: 1, color: "#a", points: [
+    { phut: 0, value: 30, stage: 1 },
+    { phut: 5, value: 35, stage: 3 },
+    { phut: 10, value: 25, stage: 4 },
+  ] };
+  const setpoint = { n: 1, color: "#b", points: [
+    { phut: 0, value: 90, stage: 1 },
+    { phut: 5, value: 88, stage: 3 },
+  ] };
+  const { rows } = buildMerged([measured], [setpoint]);
+  const row10 = rows.find((r) => r.phut === 10);
+  assert.ok(row10, "phải có row ở phut 10");
+  assert.equal(row10.m1, 25, "measured vẫn có giá trị ở phut 10");
+  assert.equal(row10.s1, null, "setpoint phải là null ở mốc vượt quá phạm vi setpoint");
+});

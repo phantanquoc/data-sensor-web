@@ -1,7 +1,11 @@
 /**
- * useFleetHistory — loads full batch history + live socket ticks for all running
- * machines. Returns two batch-scoped series sets (latest + previous) for the
- * FleetLineChart component on the Overview page.
+ * useFleetHistory — loads full batch history + live socket ticks for a
+ * configurable list of machines (default: all 8). Returns two batch-scoped
+ * series sets (latest + previous) for the FleetLineChart component.
+ *
+ * Used by:
+ *  - Overview page (all 8 machines)
+ *  - Per-machine detail page (single machine, e.g. `useFleetHistory([3])`)
  *
  * Design decisions:
  *  - Uses shared socket manager instead of opening its own 8 connections.
@@ -13,18 +17,26 @@
  *    each machine, preventing desync of batchStart when socket fires before REST.
  *  - Dual-batch: tracks both the latest and previous batch per machine so the
  *    Overview can toggle between the current and the preceding batch.
+ *  - Stable key derivation: the tracked machine list is sanitized and turned
+ *    into a primitive string key for the effect dependency array, preventing
+ *    infinite re-runs when the caller passes a fresh array literal each render.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { subscribe, unsubscribe } from './sharedSockets';
 import { getNoiChien, getNoiChienDetail } from '../api';
 import { parseTs } from './timeUtils';
 import { decideRotation, REANCHOR_TOL_MS } from './batchRotation';
+import { sanitizeMachineList, machineListKey } from './machineList';
+
+export { sanitizeMachineList, machineListKey } from './machineList';
 import type {
   StagePayload,
   NoiChienDataPayload,
   BienDuLieuEntry,
   BatchDocument,
+  SetGiaiDoanStages123,
 } from '../types';
+import { buildBatchSetpointPoints, isLiveSetpointValid } from './setpointBuilder';
 
 /** A single chart data point */
 export interface ChartPoint {
@@ -47,8 +59,8 @@ export interface MachineSeries {
 
 /** Return shape of the hook */
 export interface FleetHistoryState {
-  latest: { tempSeries: MachineSeries[]; apSeries: MachineSeries[] };
-  previous: { tempSeries: MachineSeries[]; apSeries: MachineSeries[] };
+  latest: { tempSeries: MachineSeries[]; apSeries: MachineSeries[]; setpointSeries: MachineSeries[] };
+  previous: { tempSeries: MachineSeries[]; apSeries: MachineSeries[]; setpointSeries: MachineSeries[] };
 }
 /**
  * Chart series palette — 8 visually distinct colors, harmonious with the brand
@@ -156,7 +168,15 @@ function buildBatchPoints(doc: BatchDocument, batchStartMs: number) {
     tPts.push(...buildPointsFromStage(entries, g, batchStartMs));
     aPts.push(...buildApPointsFromStage(entries, g, batchStartMs));
   }
-  return { tPts: capPoints(tPts), aPts: capPoints(aPts) };
+  // Setpoint: chỉ stages 1-3 (stage 4 không có setpoint)
+  const spStages: Array<{ entries: BienDuLieuEntry[]; stage: 1 | 2 | 3 }> = [];
+  for (let g = 1 as 1 | 2 | 3; g <= 3; g++) {
+    const gdKey = `giai_doan_${g}` as keyof BatchDocument;
+    const gd = doc[gdKey] as { bien_du_lieu?: BienDuLieuEntry[] } | undefined;
+    spStages.push({ entries: gd?.bien_du_lieu ?? [], stage: g });
+  }
+  const spPts = buildBatchSetpointPoints(spStages, batchStartMs);
+  return { tPts: capPoints(tPts), aPts: capPoints(aPts), spPts: capPoints(spPts as ChartPoint[]) };
 }
 
 interface LoadedBatch {
@@ -219,10 +239,15 @@ async function loadBatchHistoryDual(n: number): Promise<LoadResult> {
   }
 }
 
-export function useFleetHistory(): FleetHistoryState {
+
+export function useFleetHistory(machines?: number[]): FleetHistoryState {
+  // Sanitize + derive stable key so effect deps are a primitive string
+  const trackedMachines = useMemo(() => sanitizeMachineList(machines), [machines]);
+  const stableKey = useMemo(() => machineListKey(trackedMachines), [trackedMachines]);
+
   const [state, setState] = useState<FleetHistoryState>({
-    latest: { tempSeries: [], apSeries: [] },
-    previous: { tempSeries: [], apSeries: [] },
+    latest: { tempSeries: [], apSeries: [], setpointSeries: [] },
+    previous: { tempSeries: [], apSeries: [], setpointSeries: [] },
   });
 
   // --- Per-machine refs (latest batch) ---
@@ -233,27 +258,33 @@ export function useFleetHistory(): FleetHistoryState {
   const revisionRef = useRef<Record<number, number>>({});
   const latestTempPtsRef = useRef<Record<number, ChartPoint[]>>({});
   const latestApPtsRef = useRef<Record<number, ChartPoint[]>>({});
+  const latestSpPtsRef = useRef<Record<number, ChartPoint[]>>({});
 
   // --- Per-machine refs (previous batch) ---
   const prevBatchStartRef = useRef<Record<number, number>>({});
   const prevTempPtsRef = useRef<Record<number, ChartPoint[]>>({});
   const prevApPtsRef = useRef<Record<number, ChartPoint[]>>({});
+  const prevSpPtsRef = useRef<Record<number, ChartPoint[]>>({});
 
   // --- Initialization gate ---
   const initializedRef = useRef<Record<number, boolean>>({});
 
-  /** Rebuild React state from refs */
-  const pushState = () => {
+  /** Rebuild React state from refs — only emits series for tracked machines. */
+  const pushState = (tracked: number[]) => {
     const latestTemp: MachineSeries[] = [];
     const latestAp: MachineSeries[] = [];
+    const latestSp: MachineSeries[] = [];
     const prevTemp: MachineSeries[] = [];
     const prevAp: MachineSeries[] = [];
+    const prevSp: MachineSeries[] = [];
 
-    for (let n = 1; n <= 8; n++) {
+    for (const n of tracked) {
       const lt = latestTempPtsRef.current[n];
       const la = latestApPtsRef.current[n];
+      const lsp = latestSpPtsRef.current[n];
       const pt = prevTempPtsRef.current[n];
       const pa = prevApPtsRef.current[n];
+      const psp = prevSpPtsRef.current[n];
 
       if (lt && lt.length > 0) {
         latestTemp.push({ n, color: FRYER_CHART_COLORS[n], points: [...lt] });
@@ -261,21 +292,56 @@ export function useFleetHistory(): FleetHistoryState {
       if (la && la.length > 0) {
         latestAp.push({ n, color: FRYER_CHART_COLORS[n], points: [...la] });
       }
+      if (lsp && lsp.length > 0) {
+        latestSp.push({ n, color: FRYER_CHART_COLORS[n], points: [...lsp] });
+      }
       if (pt && pt.length > 0) {
         prevTemp.push({ n, color: FRYER_CHART_COLORS[n], points: [...pt] });
       }
       if (pa && pa.length > 0) {
         prevAp.push({ n, color: FRYER_CHART_COLORS[n], points: [...pa] });
       }
+      if (psp && psp.length > 0) {
+        prevSp.push({ n, color: FRYER_CHART_COLORS[n], points: [...psp] });
+      }
     }
 
     setState({
-      latest: { tempSeries: latestTemp, apSeries: latestAp },
-      previous: { tempSeries: prevTemp, apSeries: prevAp },
+      latest: { tempSeries: latestTemp, apSeries: latestAp, setpointSeries: latestSp },
+      previous: { tempSeries: prevTemp, apSeries: prevAp, setpointSeries: prevSp },
     });
   };
 
   useEffect(() => {
+    // Danh sách máy theo dõi hiện tại — parse lại từ stableKey vì effect
+    // chỉ thấy key primitive, không thấy trackedMachines (closure tham chiếu cũ).
+    const tracked = stableKey.split(',').map(Number);
+
+    // --- Reset refs cho các máy đang theo dõi khi key đổi (chuyển máy trên
+    // trang chi tiết hoặc mount lần đầu). Việc này đảm bảo dữ liệu cũ của máy
+    // trước không lọt vào series mới. Đối với Overview (key cố định "1,2,...,8")
+    // effect chỉ chạy 1 lần nên reset này không ảnh hưởng. ---
+    for (const n of tracked) {
+      delete latestBatchStartRef.current[n];
+      delete latestRunningRef.current[n];
+      delete lastStageRef.current[n];
+      delete lastElapsedRef.current[n];
+      delete latestTempPtsRef.current[n];
+      delete latestApPtsRef.current[n];
+      delete latestSpPtsRef.current[n];
+      delete prevBatchStartRef.current[n];
+      delete prevTempPtsRef.current[n];
+      delete prevApPtsRef.current[n];
+      delete prevSpPtsRef.current[n];
+      delete initializedRef.current[n];
+      revisionRef.current[n] = 0;
+    }
+    // Xoá state React ngay để UI không hiện dữ liệu máy cũ trong lúc REST load.
+    setState({
+      latest: { tempSeries: [], apSeries: [], setpointSeries: [] },
+      previous: { tempSeries: [], apSeries: [], setpointSeries: [] },
+    });
+
     const subKeys: Array<{ n: number; key: symbol }> = [];
     let cancelled = false;
     /** Máy đang có một lượt nạp lại mẻ mới đang bay → không gọi thêm. */
@@ -323,7 +389,8 @@ export function useFleetHistory(): FleetHistoryState {
           lastStageRef.current[n] = lastStage;
           latestTempPtsRef.current[n] = built.tPts;
           latestApPtsRef.current[n] = built.aPts;
-          pushState();
+          latestSpPtsRef.current[n] = built.spPts;
+          pushState(tracked);
           return;
         }
       } catch {
@@ -333,27 +400,30 @@ export function useFleetHistory(): FleetHistoryState {
       }
     };
 
-    // Initial batch load for all 8 machines (parallel)
+    // Initial batch load for tracked machines (parallel)
     const loadAll = async () => {
-      const revisionsAtLoad = Array.from(
-        { length: 8 },
-        (_, i) => revisionRef.current[i + 1] ?? 0,
-      );
+      // Ghi lại revision tại thời điểm gọi, key theo số máy (không dùng index
+      // positional) để stale-load guard so đúng revision của MÁY đó, không bị lệch
+      // khi danh sách tracked < 8 máy.
+      const revisionsAtLoad: Record<number, number> = {};
+      for (const n of tracked) {
+        revisionsAtLoad[n] = revisionRef.current[n] ?? 0;
+      }
       const results = await Promise.allSettled(
-        Array.from({ length: 8 }, (_, i) => loadBatchHistoryDual(i + 1)),
+        tracked.map((n) => loadBatchHistoryDual(n)),
       );
 
       if (cancelled) return;
 
       results.forEach((res, i) => {
-        const n = i + 1;
+        const n = tracked[i];
 
         // Mẻ MỚI đã bắt đầu trong lúc request còn bay (revision đổi) → payload
         // REST thuộc mẻ CŨ. Nạp vào `latest` sẽ trộn hai mẻ và làm lệch mốc
         // batchStart mà tick live đã đặt cho mẻ mới. Nhưng cũng không nên bỏ
         // đi: mẻ cũ chính là "Mẻ trước" của hệ này. Đưa xuống slot previous,
         // để `latest` cho tick live dựng.
-        const staleLoad = (revisionRef.current[n] ?? 0) !== revisionsAtLoad[i];
+        const staleLoad = (revisionRef.current[n] ?? 0) !== revisionsAtLoad[n];
 
         if (res.status === 'fulfilled' && res.value.latest) {
           const { latest, previous } = res.value;
@@ -367,6 +437,7 @@ export function useFleetHistory(): FleetHistoryState {
               prevBatchStartRef.current[n] = batchStartMs;
               prevTempPtsRef.current[n] = built.tPts;
               prevApPtsRef.current[n] = built.aPts;
+              prevSpPtsRef.current[n] = built.spPts;
             }
           } else {
             latestBatchStartRef.current[n] = batchStartMs;
@@ -374,12 +445,14 @@ export function useFleetHistory(): FleetHistoryState {
             lastStageRef.current[n] = lastStage;
             latestTempPtsRef.current[n] = built.tPts;
             latestApPtsRef.current[n] = built.aPts;
+            latestSpPtsRef.current[n] = built.spPts;
 
             if (previous) {
               prevBatchStartRef.current[n] = previous.batchStartMs;
               const prev = buildBatchPoints(previous.doc, previous.batchStartMs);
               prevTempPtsRef.current[n] = prev.tPts;
               prevApPtsRef.current[n] = prev.aPts;
+              prevSpPtsRef.current[n] = prev.spPts;
             }
           }
         }
@@ -387,14 +460,13 @@ export function useFleetHistory(): FleetHistoryState {
         initializedRef.current[n] = true;
       });
 
-      if (!cancelled) pushState();
+      if (!cancelled) pushState(tracked);
     };
 
     loadAll();
 
-    // Subscribe to shared sockets for live appending
-    for (let n = 1; n <= 8; n++) {
-      const machineN = n;
+    // Subscribe to shared sockets for live appending — only tracked machines
+    for (const machineN of tracked) {
 
       const onData = (payload: StagePayload[] | NoiChienDataPayload) => {
         if (cancelled) return;
@@ -439,12 +511,14 @@ export function useFleetHistory(): FleetHistoryState {
           // của máy đã là mẻ mới — đúng tình huống mở trang ngay lúc đổi mẻ.
           const curLatestTemp = latestTempPtsRef.current[machineN];
           const curLatestAp = latestApPtsRef.current[machineN];
+          const curLatestSp = latestSpPtsRef.current[machineN];
           const curLatestStart = latestBatchStartRef.current[machineN];
           const hasCurrent = (curLatestTemp?.length ?? 0) > 0 || (curLatestAp?.length ?? 0) > 0;
           if (curLatestStart != null && hasCurrent) {
             prevBatchStartRef.current[machineN] = curLatestStart;
             prevTempPtsRef.current[machineN] = curLatestTemp ?? [];
             prevApPtsRef.current[machineN] = curLatestAp ?? [];
+            prevSpPtsRef.current[machineN] = curLatestSp ?? [];
           }
 
           revisionRef.current[machineN] = (revisionRef.current[machineN] ?? 0) + 1;
@@ -452,6 +526,7 @@ export function useFleetHistory(): FleetHistoryState {
           latestRunningRef.current[machineN] = true;
           latestTempPtsRef.current[machineN] = [];
           latestApPtsRef.current[machineN] = [];
+          latestSpPtsRef.current[machineN] = [];
 
           // Nạp lại mẻ mới từ REST. Nếu chỉ tích bằng tick live thì với
           // MIN_PHUT_GAP=0.4 phải mất ~48 giây mới đủ 2 điểm để vẽ được một
@@ -487,7 +562,19 @@ export function useFleetHistory(): FleetHistoryState {
           latestApPtsRef.current[machineN] = capPoints([...aPts, newAPt]);
         }
 
-        pushState();
+        // --- Setpoint (chỉ stages 1-3, bỏ qua giá trị 0/missing) ---
+        const spSetGd = activeStage.set_giai_doan as SetGiaiDoanStages123 | undefined;
+        const spVal = spSetGd?.nhiet_do_cai_dat;
+        if (isLiveSetpointValid(stageNum, spVal)) {
+          const spPts = latestSpPtsRef.current[machineN] ?? [];
+          const lastSPt = spPts[spPts.length - 1];
+          if (!lastSPt || nowPhut - lastSPt.phut >= MIN_PHUT_GAP) {
+            const newSPt: ChartPoint = { phut: nowPhut, value: spVal as number, stage: stageNum as 1 | 2 | 3 };
+            latestSpPtsRef.current[machineN] = capPoints([...spPts, newSPt]);
+          }
+        }
+
+        pushState(tracked);
       };
 
       const onStop = () => {
@@ -501,11 +588,11 @@ export function useFleetHistory(): FleetHistoryState {
         latestRunningRef.current[machineN] = false;
       };
 
-      const key = subscribe(n, [
-        [`noi_chien_${n}_data`, onData as (...args: unknown[]) => void],
-        [`noi_chien_${n}_stop`, onStop as (...args: unknown[]) => void],
+      const key = subscribe(machineN, [
+        [`noi_chien_${machineN}_data`, onData as (...args: unknown[]) => void],
+        [`noi_chien_${machineN}_stop`, onStop as (...args: unknown[]) => void],
       ]);
-      subKeys.push({ n, key });
+      subKeys.push({ n: machineN, key });
     }
 
     return () => {
@@ -514,7 +601,8 @@ export function useFleetHistory(): FleetHistoryState {
         unsubscribe(n, key);
       }
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stableKey]);
 
   return state;
 }
