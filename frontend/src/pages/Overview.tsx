@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Activity, Flame, ChevronRight, Sun, Moon } from 'lucide-react';
+import { LayoutDashboard, Activity, Flame, ChevronRight, Sun, Moon, LogOut } from 'lucide-react';
+import { logout } from '../api';
 import { useAllFryers } from '../hooks/useAllFryers';
 import { useTheme } from '../hooks/useTheme';
 import { useFleetHistory } from '../hooks/useFleetHistory';
@@ -35,6 +36,12 @@ export const Overview: React.FC = () => {
   const [pickerOpen, setPickerOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    await logout();
+    // Reload để App kiểm tra lại phiên (getMe → 401) và hiện trang login.
+    window.location.assign('/login');
+  };
 
   // Đóng menu chọn máy khi click ra ngoài hoặc nhấn Esc
   useEffect(() => {
@@ -153,6 +160,15 @@ export const Overview: React.FC = () => {
               className="grid h-10 w-10 place-items-center rounded-full border border-border bg-surface-raised text-text-secondary transition hover:text-brand hover:border-brand/40 focus:outline-none focus:ring-2 focus:ring-brand/30"
             >
               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
+            <button
+              type="button"
+              onClick={handleLogout}
+              aria-label="Đăng xuất"
+              title="Đăng xuất"
+              className="grid h-10 w-10 place-items-center rounded-full border border-border bg-surface-raised text-text-secondary transition hover:text-val-red hover:border-val-red/40 focus:outline-none focus:ring-2 focus:ring-brand/30"
+            >
+              <LogOut size={18} />
             </button>
           </div>
         </div>

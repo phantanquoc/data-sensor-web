@@ -1,0 +1,42 @@
+# Stack test LOCAL — giống prod nhưng HTTP localhost:8090, cookie thường.
+#   - Không cần domain, Cloudflare hay cert.
+#   - Đăng nhập: admin / admin@123 (đọc từ .env).
+#
+# Chạy:  docker compose -f docker-compose.local.yml up -d --build
+# Xem:   http://localhost:8090
+# Dừng:  docker compose -f docker-compose.local.yml down
+services:
+  mongo:
+    image: mongo:7
+    container_name: iot_mongo_local
+    volumes:
+      - mongo_data_local:/data/db
+    restart: unless-stopped
+
+  iot-gateway:
+    build: ./backend
+    container_name: iot_gateway_local
+    env_file:
+      - .env
+    environment:
+      - MONGO_URI=mongodb://mongo:27017/mydb
+      - PORT_SERVER=3000
+      # Local chạy HTTP → cookie KHÔNG được Secure, nếu không login sẽ hỏng.
+      - COOKIE_SECURE=false
+    depends_on:
+      - mongo
+    restart: unless-stopped
+
+  caddy:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.local
+    container_name: iot_caddy_local
+    ports:
+      - "8090:8090"
+    depends_on:
+      - iot-gateway
+    restart: unless-stopped
+
+volumes:
+  mongo_data_local:

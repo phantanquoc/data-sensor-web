@@ -1,0 +1,55 @@
+# Production stack.
+#   - mongo & backend: KHÔNG publish port ra ngoài (chỉ nội bộ mạng Docker).
+#   - caddy: cổng công khai duy nhất. Serve React build tĩnh + HTTPS tự động
+#     + reverse-proxy API/Socket.IO sang backend.
+#
+# Chạy:  docker compose -f docker-compose.prod.yml up -d --build
+services:
+  mongo:
+    image: mongo:7
+    container_name: iot_mongo
+    volumes:
+      - mongo_data:/data/db
+    restart: unless-stopped
+    # Không mở port: chỉ backend trong cùng mạng Docker truy cập được.
+
+  iot-gateway:
+    build: ./backend
+    container_name: iot_gateway
+    env_file:
+      - .env
+    environment:
+      - MONGO_URI=mongodb://mongo:27017/mydb
+      - PORT_SERVER=3000
+      # Prod chạy sau HTTPS → cookie phải secure.
+      - COOKIE_SECURE=true
+    depends_on:
+      - mongo
+    restart: unless-stopped
+    # Không publish 3000: chỉ Caddy trong mạng Docker gọi tới iot-gateway:3000.
+
+  caddy:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: iot_caddy
+    ports:
+      # Cổng nội bộ VM Caddy lắng nghe HTTPS. Router NAT cổng Cloudflare
+      # (443 hoặc 8443) về cổng này. Cloudflare (Proxied, Full mode) là lớp TLS
+      # công khai; Caddy chỉ dùng cert nội bộ nên không cần port 80.
+      - "8090:8090"
+    environment:
+      # Domain:cổng-nội-bộ Caddy phục vụ. Đổi ở .env nếu cần.
+      - SITE_ADDRESS=${SITE_ADDRESS:-quocvxt.top:8090}
+    volumes:
+      # Lưu CA/cert nội bộ để không sinh lại mỗi lần khởi động.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - iot-gateway
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
+  caddy_data:
+  caddy_config:

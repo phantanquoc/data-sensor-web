@@ -1,7 +1,22 @@
-import React, { FormEvent, useEffect, useState } from 'react';
-import { ChevronLeft, ChevronRight, Eye, Filter, Pencil, Save, Trash2, X } from 'lucide-react';
+import React, { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import {
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Eye,
+  FileSpreadsheet,
+  FileText,
+  Filter,
+  Loader2,
+  Pencil,
+  Save,
+  Trash2,
+  X,
+} from 'lucide-react';
 import styles from './BatchList.module.css';
 import type { BatchListItem } from '../types';
+import type { ExportFormat } from './batchExport';
 
 const PAGE_SIZES = [10, 20, 50] as const;
 
@@ -21,6 +36,8 @@ interface BatchListProps {
   onEdit: (id: string, values: BatchEditValues) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onRefresh: (filters: BatchFilters) => Promise<void>;
+  /** Tải chi tiết mẻ rồi ghi ra file — trả lỗi để hàng hiển thị thông báo. */
+  onDownload: (batch: BatchListItem, format: ExportFormat) => Promise<void>;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -35,6 +52,7 @@ export const BatchList: React.FC<BatchListProps> = ({
   onEdit,
   onDelete,
   onRefresh,
+  onDownload,
 }) => {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -45,6 +63,25 @@ export const BatchList: React.FC<BatchListProps> = ({
   const [saving, setSaving] = useState(false);
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZES[0]);
   const [page, setPage] = useState(1);
+  /**
+   * Menu chọn định dạng của hàng đang mở. Menu render bằng portal với position
+   * fixed vì .tableWrap có overflow:auto — menu absolute sẽ bị cắt ở hàng cuối.
+   */
+  const [menu, setMenu] = useState<{ id: string; top: number; right: number } | null>(null);
+  /** id mẻ đang tải file — chặn bấm trùng và cho biết đang chạy */
+  const [downloading, setDownloading] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const anchorsRef = useRef(new Map<string, HTMLButtonElement>());
+
+  const openMenu = useCallback((id: string) => {
+    const rect = anchorsRef.current.get(id)?.getBoundingClientRect();
+    if (!rect) return;
+    setMenu({
+      id,
+      top: rect.bottom + 6,
+      right: Math.max(8, window.innerWidth - rect.right),
+    });
+  }, []);
 
   const total = batchList.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -53,6 +90,37 @@ export const BatchList: React.FC<BatchListProps> = ({
   useEffect(() => {
     setPage((current) => Math.min(current, totalPages));
   }, [totalPages]);
+
+  // Đóng menu khi bấm ra ngoài, nhấn Esc, hoặc khi trang cuộn/đổi kích thước
+  // (menu position:fixed nên phải đóng thay vì trôi lệch khỏi nút).
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (menuRef.current?.contains(target)) return;
+      if (anchorsRef.current.get(menu.id)?.contains(target)) return;
+      close();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') close();
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    window.addEventListener('resize', close);
+    window.addEventListener('scroll', close, true);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('resize', close);
+      window.removeEventListener('scroll', close, true);
+    };
+  }, [menu]);
+
+  // Đổi trang / đổi số dòng thì menu của hàng cũ không còn nghĩa
+  useEffect(() => {
+    setMenu(null);
+  }, [page, pageSize]);
 
   const startIndex = (page - 1) * pageSize;
   const pageItems = batchList.slice(startIndex, startIndex + pageSize);
@@ -99,6 +167,19 @@ export const BatchList: React.FC<BatchListProps> = ({
       setError(err instanceof Error ? err.message : 'Không thể sửa mẻ');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const runDownload = async (batch: BatchListItem, format: ExportFormat) => {
+    setMenu(null);
+    setDownloading(batch._id);
+    setError(null);
+    try {
+      await onDownload(batch, format);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Không thể tải dữ liệu mẻ');
+    } finally {
+      setDownloading(null);
     }
   };
 
@@ -183,6 +264,23 @@ export const BatchList: React.FC<BatchListProps> = ({
                       <Pencil size={15} /> Sửa
                     </button>
                     <button
+                      ref={(node) => {
+                        if (node) anchorsRef.current.set(batch._id, node);
+                        else anchorsRef.current.delete(batch._id);
+                      }}
+                      className={styles.downloadBtn}
+                      title="Tải dữ liệu mẻ về máy"
+                      aria-haspopup="menu"
+                      aria-expanded={menu?.id === batch._id}
+                      disabled={downloading === batch._id}
+                      onClick={() => menu?.id === batch._id ? setMenu(null) : openMenu(batch._id)}
+                    >
+                      {downloading === batch._id
+                        ? <Loader2 size={15} className={styles.spin} />
+                        : <Download size={15} />}
+                      {downloading === batch._id ? 'Đang tải...' : 'Tải về'}
+                    </button>
+                    <button
                       className={styles.deleteBtn}
                       title="Xóa mẻ"
                       disabled={batch.trang_thai === 'running'}
@@ -246,6 +344,36 @@ export const BatchList: React.FC<BatchListProps> = ({
           </div>
         </div>
       </div>
+
+      {menu && (() => {
+        const target = batchList.find((item) => item._id === menu.id);
+        if (!target) return null;
+        return createPortal(
+          <div
+            ref={menuRef}
+            className={styles.downloadMenu}
+            role="menu"
+            aria-label={`Chọn định dạng tải về cho ${target.ma_me_chien}`}
+            style={{ top: menu.top, right: menu.right }}
+          >
+            <button type="button" role="menuitem" onClick={() => void runDownload(target, 'excel')}>
+              <FileSpreadsheet size={15} />
+              <span>
+                Excel
+                <small>Mở trực tiếp bằng Excel</small>
+              </span>
+            </button>
+            <button type="button" role="menuitem" onClick={() => void runDownload(target, 'csv')}>
+              <FileText size={15} />
+              <span>
+                CSV
+                <small>Chuẩn, cho Sheets / phân tích</small>
+              </span>
+            </button>
+          </div>,
+          document.body,
+        );
+      })()}
 
       {editing && (
         <div className={styles.modalBackdrop} role="presentation" onMouseDown={() => !saving && setEditing(null)}>

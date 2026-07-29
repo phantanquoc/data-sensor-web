@@ -18,7 +18,7 @@ const {
   dongDienHopLe,
   nenChotDongDien,
   nenChotDongDienRoot,
-  nenChotLatchPlc,
+  nenChotLatchPlcMotO,
   postDataPlc,
 } = require("../backend/controller/post_data_plc");
 
@@ -79,34 +79,38 @@ test("nenChotDongDien: giá trị ngoài dải → chưa chốt (pure predicate)
   assert.strictEqual(nenChotDongDienRoot(8.7), true);
 });
 
-// ------------------------------------- nhóm thanh ghi PLC latch (t/g + áp suất)
+// -------------------- latch MỘT Ô độc lập (nenChotLatchPlcMotO) --------------------
+// PLC ghi thời gian và áp suất trên các nhịp scan KHÁC nhau. Nếu chốt chung một cờ,
+// ô nào về non-zero trước sẽ đóng băng ô kia ở 0. Mỗi ô phải tự chốt theo giá trị
+// của CHÍNH nó.
 
-test("latch: đọc được ngay lần đầu → chốt luôn", () => {
-  assert.strictEqual(nenChotLatchPlc(1, 91, 680), true);
+test("latchMotO: đọc được ngay lần đầu (khác 0) → chốt luôn", () => {
+  assert.strictEqual(nenChotLatchPlcMotO(1, 91), true);
+  assert.strictEqual(nenChotLatchPlcMotO(1, 680), true);
 });
 
-test("latch: chỉ một trong hai khác 0 cũng tính là đọc được", () => {
-  // PLC có thể ghi hai thanh ghi lệch nhau một nhịp scan.
-  assert.strictEqual(nenChotLatchPlc(1, 91, 0), true, "có thời gian → chốt");
-  assert.strictEqual(nenChotLatchPlc(1, 0, 680), true, "có áp suất → chốt");
+test("latchMotO: giá trị âm là số đo thật → chốt", () => {
+  assert.strictEqual(nenChotLatchPlcMotO(1, -2.5), true);
 });
 
-test("latch: cả hai còn 0 thì đọc lại, tối đa 5 lần", () => {
+test("latchMotO: còn 0 thì đọc lại, tối đa 5 lần rồi chốt (caller latch null)", () => {
   for (let reads = 1; reads <= 4; reads++) {
-    assert.strictEqual(nenChotLatchPlc(reads, 0, 0), false, `lần ${reads} → đọc lại`);
+    assert.strictEqual(nenChotLatchPlcMotO(reads, 0), false, `lần ${reads} → đọc lại`);
   }
-  assert.strictEqual(nenChotLatchPlc(5, 0, 0), true, "lần 5 → hết lượt, chốt (caller latch null)");
+  assert.strictEqual(nenChotLatchPlcMotO(5, 0), true, "lần 5 → hết lượt, chốt");
 });
 
-test("latch: đọc được ở lần 3 thì chốt ở lần 3, không chờ hết 5 lần", () => {
-  assert.strictEqual(nenChotLatchPlc(1, 0, 0), false);
-  assert.strictEqual(nenChotLatchPlc(2, 0, 0), false);
-  assert.strictEqual(nenChotLatchPlc(3, 5, 735.94), true);
+test("latchMotO: đọc được ở lần 3 thì chốt lần 3, không chờ hết 5", () => {
+  assert.strictEqual(nenChotLatchPlcMotO(1, 0), false);
+  assert.strictEqual(nenChotLatchPlcMotO(2, 0), false);
+  assert.strictEqual(nenChotLatchPlcMotO(3, 735.94), true);
 });
 
-test("latch: áp suất âm là số đo thật, không phải 'chưa đọc được'", () => {
-  // ap_suat_vong_nuoc thực tế có giá trị âm (-2.5); ngưỡng phải là "khác 0".
-  assert.strictEqual(nenChotLatchPlc(1, 0, -0.45), true);
+test("latchMotO: ô này KHÔNG phụ thuộc ô kia — độc lập hoàn toàn", () => {
+  // Đây là điểm khác biệt cốt lõi so với nenChotLatchPlc: chỉ nhận một giá trị.
+  // Thời gian còn 0 (chưa về) trong khi áp suất đã về → mỗi ô tự quyết.
+  assert.strictEqual(nenChotLatchPlcMotO(1, 0), false, "thời gian 0 → chưa chốt");
+  assert.strictEqual(nenChotLatchPlcMotO(1, 680), true, "áp suất 680 → chốt");
 });
 
 // ========================================================================
@@ -541,7 +545,7 @@ test("PLC latch counter: write reject không tăng bộ đếm thêm (budget 5 =
     });
   }
   // Cycle 5 (budget = 5): PLC latch có data → nếu budget chưa bị double-count thì latchReads=5
-  // và nenChotLatchPlc(5, 91, 100) → true (coData=true) → latch giá trị thật
+  // và mỗi ô chốt độc lập khi giá trị != 0 (hoặc hết PLC_LATCH_MAX_READS) → latch giá trị thật
   await run(model, n, 2, {
     D575: 0x0000, D576: 0x4108,
     D571: 0x0000, D572: 0x4140,
@@ -668,4 +672,94 @@ test("M155: window close latches null khi dòng điện rác suốt cap", async 
   }
   assert.strictEqual(lastRoot, null, "nhung_hang: garbage for 10 cycles → root latches null");
   assert.strictEqual(lastVN, null, "nhung_hang: garbage for 10 cycles → vong nuoc latches null");
+});
+
+// ========================================================================
+// SPLIT-FLAG REGRESSION: thời gian và áp suất chốt ĐỘC LẬP nhau.
+// Bug cũ: dùng chung một cờ latch với OR (giay != 0 || apSuat != 0). PLC ghi
+// hai thanh ghi lệch nhịp scan → ô nào về non-zero trước sẽ đóng băng ô kia ở 0.
+// Đây chính là hai screenshot: kick_root (time=0, pres=680) và nhung_hang
+// (time=4s, pres=0) — số 0 đối xứng.
+// Mỗi test dùng fryer index riêng (n = 30+).
+// ========================================================================
+
+// Helper: lấy giá trị field cuối cùng được persist cho một row
+function lastFieldValue(calls, row, field) {
+  const writes = calls.updateOne.filter((c) => {
+    const keys = Object.keys(c.update.$set || {});
+    return keys.some((k) => k === "hieu_suat_may." + row || k.startsWith("hieu_suat_may." + row + "."));
+  });
+  let val = undefined;
+  for (const w of writes) {
+    const set = w.update.$set;
+    if (set["hieu_suat_may." + row] && set["hieu_suat_may." + row][field] !== undefined) {
+      val = set["hieu_suat_may." + row][field];
+    }
+    if (("hieu_suat_may." + row + "." + field) in set) {
+      val = set["hieu_suat_may." + row + "." + field];
+    }
+  }
+  return val;
+}
+
+// --- Test 15: áp suất về trước, thời gian về SAU → thời gian KHÔNG bị đóng băng ở 0 ---
+test("SPLIT kick_root: áp suất về ở cycle 1, thời gian về ở cycle 3 → chốt cả hai đúng", async () => {
+  const { model, calls } = makeModel();
+  const n = 30;
+  await run(model, n, 1);
+  // M1 edge: áp suất đã về (680.0 float LE = D216=0x0000, D217=0x442A), thời gian CHƯA
+  await run(model, n, 2, {
+    M1: true,
+    D216: 0x0000, D217: 0x442A,   // áp suất 680 → chốt ngay
+    D668: 0, D666: 0,             // thời gian chưa về
+  });
+  // Cycle 2: thời gian vẫn chưa về
+  await run(model, n, 2, { D216: 0x0000, D217: 0x442A, D668: 0, D666: 0 });
+  // Cycle 3: thời gian về = 91s
+  await run(model, n, 2, { D216: 0x0000, D217: 0x442A, D668: 1, D666: 31 });
+
+  assert.strictEqual(lastFieldValue(calls, "kick_root", "giay_tu_start"), 91,
+    "thời gian về muộn ở cycle 3 phải được chốt đúng 91s, KHÔNG bị đóng băng 0");
+  assert.strictEqual(lastFieldValue(calls, "kick_root", "ap_suat_chan_khong"), 680,
+    "áp suất về cycle 1 giữ nguyên 680");
+});
+
+// --- Test 16: thời gian về trước, áp suất về SAU → áp suất KHÔNG bị đóng băng ở 0 ---
+test("SPLIT nhung_hang: thời gian về ở cycle 1, áp suất về ở cycle 3 → chốt cả hai đúng", async () => {
+  const { model, calls } = makeModel();
+  const n = 31;
+  await run(model, n, 1);
+  // M1 edge trước
+  await run(model, n, 2, { M1: true, D575: 0x0000, D576: 0x4108, D571: 0x0000, D572: 0x4140 });
+  // M155 edge: thời gian đã về (4s), áp suất CHƯA
+  await run(model, n, 2, {
+    D676: 0, D674: 4,     // 4s → chốt ngay
+    D672: 0, D673: 0,     // áp suất chưa về
+  }, true);
+  // Cycle 2: áp suất vẫn chưa về
+  await run(model, n, 2, { D676: 0, D674: 4, D672: 0, D673: 0 }, true);
+  // Cycle 3: áp suất về = 720.0 float LE = D672=0x0000, D673=0x4434
+  await run(model, n, 2, { D676: 0, D674: 4, D672: 0x0000, D673: 0x4434 }, true);
+
+  assert.strictEqual(lastFieldValue(calls, "nhung_hang", "giay_tu_start"), 4,
+    "thời gian về cycle 1 giữ nguyên 4s");
+  assert.strictEqual(lastFieldValue(calls, "nhung_hang", "ap_suat_chan_khong"), 720,
+    "áp suất về muộn ở cycle 3 phải được chốt đúng 720, KHÔNG bị đóng băng 0");
+});
+
+// --- Test 17: một ô hết budget (null), ô kia có data → không kéo nhau ---
+test("SPLIT kick_root: thời gian hết 5 lần vẫn 0 → null; áp suất có data → giữ giá trị", async () => {
+  const { model, calls } = makeModel();
+  const n = 32;
+  await run(model, n, 1);
+  // M1 edge: áp suất về ngay (680.0 float LE), thời gian không bao giờ về
+  await run(model, n, 2, { M1: true, D216: 0x0000, D217: 0x442A, D668: 0, D666: 0 });
+  // 5 cycles nữa: thời gian vẫn 0 → hết budget → chốt null
+  for (let i = 0; i < 5; i++) {
+    await run(model, n, 2, { D216: 0x0000, D217: 0x442A, D668: 0, D666: 0 });
+  }
+  assert.strictEqual(lastFieldValue(calls, "kick_root", "giay_tu_start"), null,
+    "thời gian hết budget → null (không phải 0)");
+  assert.strictEqual(lastFieldValue(calls, "kick_root", "ap_suat_chan_khong"), 680,
+    "áp suất vẫn giữ 680 dù thời gian null");
 });

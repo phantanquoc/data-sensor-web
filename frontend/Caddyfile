@@ -1,0 +1,32 @@
+# Hướng A: Cloudflare Proxied (mây cam) + SSL mode "Full".
+#   Trình duyệt --HTTPS--> Cloudflare --HTTPS--> Caddy (origin).
+#   Cloudflare KHÔNG kiểm cert origin ở mode Full, nên Caddy chỉ cần cert nội bộ
+#   (tls internal) — không cần Let's Encrypt, không cần port 80/443 để xin cert,
+#   không cần Cloudflare API token.
+# SITE_ADDRESS = "quocvxt.top:8090" → Caddy phục vụ HTTPS ở cổng 8090 cho host quocvxt.top.
+{$SITE_ADDRESS} {
+	encode gzip zstd
+	root * /srv
+
+	# Cert tự ký từ CA nội bộ của Caddy (đủ cho Cloudflare Full mode).
+	tls internal
+
+	# Socket.IO — reverse_proxy tự nâng cấp WebSocket (Upgrade header)
+	handle /socket.io/* {
+		reverse_proxy iot-gateway:3000
+	}
+
+	# REST API → backend. Dùng tiền tố nên /get_noi_chien* phủ luôn
+	# /get_noi_chien_chart và /get_noi_chien_detail (giống proxy của Vite).
+	@api path /api/* /thong_ke* /get_noi_chien* /sua_noi_chien_detail* /xoa_noi_chien_detail* /enable_machine*
+	handle @api {
+		reverse_proxy iot-gateway:3000
+	}
+
+	# Còn lại là SPA React: có file thì trả file, không thì trả index.html
+	# để react-router xử lý client-side route.
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
+}

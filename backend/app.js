@@ -3,12 +3,18 @@ global.crypto = crypto;
 const express = require("express");
 const app = express();
 const cors = require("cors");
-app.use(cors());
+// Cùng origin sau Caddy nên không cần CORS mở; nếu vẫn dùng thì phải cho gửi cookie.
+app.use(cors({ origin: true, credentials: true }));
+const cookieParser = require("cookie-parser");
+app.use(cookieParser());
 const path = require("path");
 const fs = require("fs");
 const { formatVietnamTimestamp } = require("./utils/time");
 // .env nằm ở gốc repo (backend/..) — chỉ định tường minh để đọc đúng dù chạy từ thư mục nào.
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
+
+// require SAU dotenv: auth.js đọc AUTH_USER/AUTH_PASS/JWT_SECRET ngay lúc load.
+const auth = require("./auth");
 
 const DEBUG = process.env.DEBUG === "true" || process.env.DEBUG === "1";
 function dbg(...args) { if (DEBUG) console.log(...args); }
@@ -21,6 +27,13 @@ app.use(express.urlencoded({ extended: true }));
 const SPA_DIR = path.join(__dirname, "..", "frontend", "dist");
 app.use(express.static(SPA_DIR));
 
+// ===== Xác thực (public — phải đứng TRƯỚC requireAuth) =====
+app.post("/api/login", auth.login);
+app.post("/api/logout", auth.logout);
+app.get("/api/me", auth.me);
+
+// Từ đây trở xuống mọi API đều yêu cầu đăng nhập.
+app.use("/enable_machine", auth.requireAuth);
 app.post("/enable_machine", (req, res, next) => {
   console.log(req.body);
   res.json({
@@ -31,7 +44,7 @@ app.post("/enable_machine", (req, res, next) => {
 
 // REST API cho React SPA. router/home.js phục vụ các endpoint get/sua/xoa.
 const home = require("./router/home");
-app.use(home);
+app.use(auth.requireAuth, home);
 
 // React client-side route fallback: mọi GET không khớp static/API → trả index.html
 // để react-router xử lý (Overview `/`, FryerDetail `/may/:n`, ...).
@@ -59,9 +72,12 @@ function startServer() {
 
       io_ = require("socket.io")(server_app, {
         cors: {
-          origin: "*",
+          origin: true,
+          credentials: true,
         },
       });
+      // Chặn mọi kết nối socket không kèm cookie đăng nhập hợp lệ.
+      io_.use(auth.socketAuth);
       // Lưu io để dùng ở controller hoặc file khác
       app.set("io_", io_);
       // ===== Socket Connection =====

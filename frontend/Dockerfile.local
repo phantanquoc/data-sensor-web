@@ -1,0 +1,15 @@
+# Frontend cho test LOCAL: build React tĩnh rồi serve bằng Caddy chuẩn (HTTP, no TLS).
+# Không cần xcaddy/Cloudflare plugin nên build nhanh hơn bản prod.
+
+# ---- Stage 1: build React ----
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+# ---- Stage 2: serve ----
+FROM caddy:2-alpine
+COPY --from=build /app/dist /srv
+COPY Caddyfile.local /etc/caddy/Caddyfile

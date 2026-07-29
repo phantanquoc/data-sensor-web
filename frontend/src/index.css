@@ -131,12 +131,12 @@
 html[data-theme="light"] {
   color-scheme: light;
 
-  --color-canvas: #f2f4f7;
-  --color-canvas-light: #f2f4f7;
+  --color-canvas: #e9edf2;
+  --color-canvas-light: #e9edf2;
 
-  --color-surface: #ffffff;
-  --color-surface-raised: #ffffff;
-  --color-surface-overlay: #f8fafc;
+  --color-surface: #f7f9fc;
+  --color-surface-raised: #fcfdff;
+  --color-surface-overlay: #eef2f7;
 
   --color-brand: #2196f3;
   --color-brand-dark: #1976d2;
@@ -205,12 +205,12 @@ html[data-theme="light"] {
   --color-chart-label: #64748b;
 
   /* RGB channels (space-separated) for Tailwind opacity-slash utilities */
-  --color-canvas-rgb: 242 244 247;
+  --color-canvas-rgb: 233 237 242;
   --color-brand-rgb: 33 150 243;
   --color-brand-dark-rgb: 25 118 210;
-  --color-surface-rgb: 255 255 255;
-  --color-surface-raised-rgb: 255 255 255;
-  --color-surface-overlay-rgb: 248 250 252;
+  --color-surface-rgb: 247 249 252;
+  --color-surface-raised-rgb: 252 253 255;
+  --color-surface-overlay-rgb: 238 242 247;
   --color-border-rgb: 226 232 240;
   --color-border-active-rgb: 0 180 216;
   --color-val-blue-rgb: 37 99 235;

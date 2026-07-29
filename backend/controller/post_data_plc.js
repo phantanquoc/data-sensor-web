@@ -44,9 +44,12 @@ const giayVaoGd1 = {};
 //  2. Dòng điện (root + vòng nước): chốt ngay nếu giá trị trong (0, 50]. Nếu chưa dùng
 //     được thì đợi tối đa DONG_DIEN_MAX_WAIT_CYCLES cycle VÀ chỉ khi còn trong pha của
 //     mốc. Hết window → chốt null (UI hiện '—').
-//  3. Thanh ghi PLC latch (thời gian + áp suất): PLC ghi trễ vài cycle → đọc tối đa
-//     PLC_LATCH_MAX_READS lần; khác 0 → chốt. Hết lượt vẫn 0 → chốt null (phân biệt
-//     "không đo được" với "đo được = 0").
+//  3. Thanh ghi PLC latch (thời gian VÀ áp suất — CHỐT ĐỘC LẬP): PLC ghi trễ vài
+//     cycle, và hai thanh ghi này KHÔNG cập nhật cùng một scan (PLC dùng timer ghi
+//     từng ô vào HMI ở thời điểm khác nhau, gateway đọc qua TCP theo poll cycle).
+//     Mỗi ô đọc tối đa PLC_LATCH_MAX_READS lần độc lập; khác 0 → chốt ô đó. Hết lượt
+//     vẫn 0 → chốt null (phân biệt "không đo được" với "đo được = 0"). Tách riêng để
+//     ô về sớm không kéo ô về trễ chốt oan = 0.
 //  4. Ghi DB: MỘT updateOne duy nhất mỗi cycle mỗi row. Cell chỉ đánh dấu Done SAU KHI
 //     write resolve thành công; reject → giữ RAM, retry cycle sau.
 const m1Prev = {};
@@ -71,17 +74,25 @@ const DONG_DIEN_MAX_WAIT_CYCLES = 10;
 //             khỏi bị window-close ghi đè null khi write DB thất bại.
 //   *Done    = ô đã persist thành công vào DB. Khi write reject → rollback Done (để
 //             retry write), nhưng Settled giữ nguyên nên RAM an toàn.
-const kickRootLatchReads = {};   // số lần đã đọc nhóm latch của kick_root
-const kickRootLatchSettled = {}; // giá trị latch đã xác định trong RAM (sticky)
-const kickRootLatchDone = {};    // đã persist thời gian + áp suất kick_root vào DB
+// Nhóm latch tách đôi: thời gian (D668/D666) và áp suất (D216/D217) chốt ĐỘC LẬP,
+// mỗi ô một bộ đếm + cờ riêng vì PLC ghi hai thanh ghi lệch nhịp scan.
+const kickRootTimeReads = {};    // số lần đã đọc thời gian của kick_root
+const kickRootTimeSettled = {};  // giá trị thời gian đã xác định trong RAM (sticky)
+const kickRootTimeDone = {};     // đã persist thời gian kick_root vào DB
+const kickRootPresReads = {};    // số lần đã đọc áp suất của kick_root
+const kickRootPresSettled = {};  // giá trị áp suất đã xác định trong RAM (sticky)
+const kickRootPresDone = {};     // đã persist áp suất kick_root vào DB
 const kickRootRootSettled = {};  // giá trị root current đã xác định trong RAM (sticky)
 const kickRootRootDone = {};     // đã persist dòng điện root của kick_root vào DB
 const kickRootVongNuocSettled = {}; // giá trị vòng nước current đã xác định trong RAM (sticky)
 const kickRootVongNuocDone = {}; // đã persist dòng điện vòng nước của kick_root vào DB
 const kickRootCycles = {};       // số cycle kể từ sườn lên M1 (đếm window chờ dòng điện)
-const nhungHangLatchReads = {};  // số lần đã đọc nhóm latch của nhung_hang
-const nhungHangLatchSettled = {}; // giá trị latch đã xác định trong RAM (sticky)
-const nhungHangLatchDone = {};   // đã persist thời gian + áp suất nhung_hang vào DB
+const nhungHangTimeReads = {};   // số lần đã đọc thời gian của nhung_hang
+const nhungHangTimeSettled = {}; // giá trị thời gian đã xác định trong RAM (sticky)
+const nhungHangTimeDone = {};    // đã persist thời gian nhung_hang vào DB
+const nhungHangPresReads = {};   // số lần đã đọc áp suất của nhung_hang
+const nhungHangPresSettled = {}; // giá trị áp suất đã xác định trong RAM (sticky)
+const nhungHangPresDone = {};    // đã persist áp suất nhung_hang vào DB
 const nhungHangRootSettled = {}; // giá trị root current đã xác định trong RAM (sticky)
 const nhungHangRootDone = {};    // đã persist dòng điện root của nhung_hang vào DB
 const nhungHangVongNuocSettled = {}; // giá trị vòng nước current đã xác định trong RAM (sticky)
@@ -122,17 +133,17 @@ const nenChotDongDienRoot = nenChotDongDien;
 exports.nenChotDongDienRoot = nenChotDongDienRoot;
 
 /**
- * Đã đến lúc chốt nhóm thanh ghi PLC latch (thời gian + áp suất) chưa?
- * Khác 0 là đọc được → chốt. Hết lượt đọc mà vẫn 0 → chốt null (không đo được).
+ * Đã đến lúc chốt MỘT ô latch PLC chưa? (dùng riêng cho thời gian HOẶC áp suất)
+ * Thời gian và áp suất cập nhật lệch nhịp scan nên phải xét độc lập từng ô, không
+ * gộp OR — nếu gộp, ô về sớm sẽ kéo ô về trễ chốt oan = 0.
+ * Khác 0 → chốt luôn. Hết PLC_LATCH_MAX_READS lượt vẫn 0 → chốt null (không đo được).
  * @param {number} reads - lần đọc thứ mấy (1 = lần đầu)
- * @param {number} giay - thời gian từ PLC (D668*60+D666 hoặc D676*60+D674)
- * @param {number} apSuat - áp suất từ PLC (D216/D217 hoặc D672/D673)
+ * @param {number} giaTri - giá trị ô này đọc ở cycle này (giây hoặc áp suất)
  */
-function nenChotLatchPlc(reads, giay, apSuat) {
-  const coData = Number(giay) !== 0 || Number(apSuat) !== 0;
-  return coData || (Number(reads) || 0) >= PLC_LATCH_MAX_READS;
+function nenChotLatchPlcMotO(reads, giaTri) {
+  return Number(giaTri) !== 0 || (Number(reads) || 0) >= PLC_LATCH_MAX_READS;
 }
-exports.nenChotLatchPlc = nenChotLatchPlc;
+exports.nenChotLatchPlcMotO = nenChotLatchPlcMotO;
 
 function temporaryBatchCode(n, startedAt, id) {
   const datePart = formatVietnamDateCode(startedAt);
@@ -494,7 +505,8 @@ exports.postDataPlc = async (
     // Ghi nhận trạng thái TRƯỚC cycle này để biết ô nào vừa mới chốt
     const prevRootDone = !!kickRootRootDone[n];
     const prevVongNuocDone = !!kickRootVongNuocDone[n];
-    const prevLatchDone = !!kickRootLatchDone[n];
+    const prevTimeDone = !!kickRootTimeDone[n];
+    const prevPresDone = !!kickRootPresDone[n];
 
     // --- Dòng điện root ---
     // Chỉ đánh giá khi giá trị CHƯA ổn định trong RAM (Settled bảo vệ khỏi ghi đè)
@@ -526,17 +538,26 @@ exports.postDataPlc = async (
       }
     }
 
-    // --- Nhóm latch PLC (thời gian + áp suất): tối đa PLC_LATCH_MAX_READS lần ---
+    // --- Thời gian (D668/D666): tối đa PLC_LATCH_MAX_READS lần, chốt ĐỘC LẬP ---
     // Chỉ tăng bộ đếm khi giá trị CHƯA ổn định — write DB reject không tiêu hao budget.
-    if (!kickRootLatchSettled[n]) {
-      kickRootLatchReads[n] = (kickRootLatchReads[n] || 0) + 1;
-      if (nenChotLatchPlc(kickRootLatchReads[n], giay_m120_m1, d_216_217)) {
-        const coData = giay_m120_m1 !== 0 || d_216_217 !== 0;
-        hieuSuatKickRoot[n].giay_tu_start = coData ? giay_m120_m1 : null;
-        hieuSuatKickRoot[n].ap_suat_chan_khong = coData ? d_216_217 : null;
-        kickRootLatchSettled[n] = true;
-        kickRootLatchDone[n] = true;
-        if (!coData) dbg("nồi chiên " + n + " kick_root latch: hết " + PLC_LATCH_MAX_READS + " lần đọc vẫn 0 → chốt null");
+    if (!kickRootTimeSettled[n]) {
+      kickRootTimeReads[n] = (kickRootTimeReads[n] || 0) + 1;
+      if (nenChotLatchPlcMotO(kickRootTimeReads[n], giay_m120_m1)) {
+        hieuSuatKickRoot[n].giay_tu_start = giay_m120_m1 !== 0 ? giay_m120_m1 : null;
+        kickRootTimeSettled[n] = true;
+        kickRootTimeDone[n] = true;
+        if (giay_m120_m1 === 0) dbg("nồi chiên " + n + " kick_root thời gian: hết " + PLC_LATCH_MAX_READS + " lần đọc vẫn 0 → chốt null");
+      }
+    }
+
+    // --- Áp suất (D216/D217): tối đa PLC_LATCH_MAX_READS lần, chốt ĐỘC LẬP ---
+    if (!kickRootPresSettled[n]) {
+      kickRootPresReads[n] = (kickRootPresReads[n] || 0) + 1;
+      if (nenChotLatchPlcMotO(kickRootPresReads[n], d_216_217)) {
+        hieuSuatKickRoot[n].ap_suat_chan_khong = d_216_217 !== 0 ? d_216_217 : null;
+        kickRootPresSettled[n] = true;
+        kickRootPresDone[n] = true;
+        if (d_216_217 === 0) dbg("nồi chiên " + n + " kick_root áp suất: hết " + PLC_LATCH_MAX_READS + " lần đọc vẫn 0 → chốt null");
       }
     }
 
@@ -545,13 +566,15 @@ exports.postDataPlc = async (
     // hoặc (c) có ô đã settled nhưng chưa persist (write trước đó fail).
     const newlyLatchedRoot = !prevRootDone && !!kickRootRootDone[n];
     const newlyLatchedVN = !prevVongNuocDone && !!kickRootVongNuocDone[n];
-    const newlyLatchedLatch = !prevLatchDone && !!kickRootLatchDone[n];
+    const newlyLatchedTime = !prevTimeDone && !!kickRootTimeDone[n];
+    const newlyLatchedPres = !prevPresDone && !!kickRootPresDone[n];
     // Ô settled nhưng Done = false → write trước reject, cần retry
     const retryRoot = !!kickRootRootSettled[n] && !kickRootRootDone[n];
     const retryVN = !!kickRootVongNuocSettled[n] && !kickRootVongNuocDone[n];
-    const retryLatch = !!kickRootLatchSettled[n] && !kickRootLatchDone[n];
-    const hasNewCell = newlyLatchedRoot || newlyLatchedVN || newlyLatchedLatch;
-    const hasRetry = retryRoot || retryVN || retryLatch;
+    const retryTime = !!kickRootTimeSettled[n] && !kickRootTimeDone[n];
+    const retryPres = !!kickRootPresSettled[n] && !kickRootPresDone[n];
+    const hasNewCell = newlyLatchedRoot || newlyLatchedVN || newlyLatchedTime || newlyLatchedPres;
+    const hasRetry = retryRoot || retryVN || retryTime || retryPres;
     if (id_document[n] && (!kickRootPersisted[n] || hasNewCell || hasRetry)) {
       try {
         if (!kickRootPersisted[n]) {
@@ -564,23 +587,23 @@ exports.postDataPlc = async (
           // Whole-object ghi tất cả cells đã settled → đánh dấu Done cho chúng
           if (kickRootRootSettled[n]) kickRootRootDone[n] = true;
           if (kickRootVongNuocSettled[n]) kickRootVongNuocDone[n] = true;
-          if (kickRootLatchSettled[n]) kickRootLatchDone[n] = true;
+          if (kickRootTimeSettled[n]) kickRootTimeDone[n] = true;
+          if (kickRootPresSettled[n]) kickRootPresDone[n] = true;
         } else {
           // Đã persist rồi: chỉ ghi field-path cho các ô cần ghi (mới chốt hoặc retry)
           const set = {};
           if (newlyLatchedRoot || retryRoot) set["hieu_suat_may.kick_root.dong_dien_dong_co_root"] = hieuSuatKickRoot[n].dong_dien_dong_co_root;
           if (newlyLatchedVN || retryVN) set["hieu_suat_may.kick_root.dong_dien_dong_co_vong_nuoc"] = hieuSuatKickRoot[n].dong_dien_dong_co_vong_nuoc;
-          if (newlyLatchedLatch || retryLatch) {
-            set["hieu_suat_may.kick_root.giay_tu_start"] = hieuSuatKickRoot[n].giay_tu_start;
-            set["hieu_suat_may.kick_root.ap_suat_chan_khong"] = hieuSuatKickRoot[n].ap_suat_chan_khong;
-          }
+          if (newlyLatchedTime || retryTime) set["hieu_suat_may.kick_root.giay_tu_start"] = hieuSuatKickRoot[n].giay_tu_start;
+          if (newlyLatchedPres || retryPres) set["hieu_suat_may.kick_root.ap_suat_chan_khong"] = hieuSuatKickRoot[n].ap_suat_chan_khong;
           if (Object.keys(set).length > 0) {
             await model.updateOne({ _id: id_document[n] }, { $set: set });
           }
           // Ghi thành công → mark Done cho các ô vừa ghi
           if (newlyLatchedRoot || retryRoot) kickRootRootDone[n] = true;
           if (newlyLatchedVN || retryVN) kickRootVongNuocDone[n] = true;
-          if (newlyLatchedLatch || retryLatch) kickRootLatchDone[n] = true;
+          if (newlyLatchedTime || retryTime) kickRootTimeDone[n] = true;
+          if (newlyLatchedPres || retryPres) kickRootPresDone[n] = true;
         }
         dbg("nồi chiên " + n + " persist kick_root (cycle " + kickRootCycles[n] + ")");
       } catch (err) {
@@ -588,7 +611,8 @@ exports.postDataPlc = async (
         // KHÔNG rollback Settled — giá trị RAM đã xác định, không bao giờ bị ghi đè.
         if (newlyLatchedRoot || retryRoot) kickRootRootDone[n] = false;
         if (newlyLatchedVN || retryVN) kickRootVongNuocDone[n] = false;
-        if (newlyLatchedLatch || retryLatch) kickRootLatchDone[n] = false;
+        if (newlyLatchedTime || retryTime) kickRootTimeDone[n] = false;
+        if (newlyLatchedPres || retryPres) kickRootPresDone[n] = false;
         if (!kickRootPersisted[n]) {
           // Row chưa ghi lần đầu → retry whole-object cycle sau
         }
@@ -626,7 +650,8 @@ exports.postDataPlc = async (
     // Ghi nhận trạng thái TRƯỚC cycle này
     const prevNHRootDone = !!nhungHangRootDone[n];
     const prevNHVongNuocDone = !!nhungHangVongNuocDone[n];
-    const prevNHLatchDone = !!nhungHangLatchDone[n];
+    const prevNHTimeDone = !!nhungHangTimeDone[n];
+    const prevNHPresDone = !!nhungHangPresDone[n];
 
     // --- Dòng điện root ---
     // Chỉ đánh giá khi giá trị CHƯA ổn định trong RAM (Settled bảo vệ khỏi ghi đè)
@@ -657,30 +682,41 @@ exports.postDataPlc = async (
       }
     }
 
-    // --- Nhóm latch PLC (thời gian + áp suất) ---
+    // --- Thời gian (D676/D674): tối đa PLC_LATCH_MAX_READS lần, chốt ĐỘC LẬP ---
     // Chỉ tăng bộ đếm khi giá trị CHƯA ổn định — write DB reject không tiêu hao budget.
-    if (!nhungHangLatchSettled[n]) {
-      nhungHangLatchReads[n] = (nhungHangLatchReads[n] || 0) + 1;
-      if (nenChotLatchPlc(nhungHangLatchReads[n], giay_m1_m155, d_672_673)) {
-        const coData = giay_m1_m155 !== 0 || d_672_673 !== 0;
-        hieuSuatNhungHang[n].giay_tu_start = coData ? giay_m1_m155 : null;
-        hieuSuatNhungHang[n].ap_suat_chan_khong = coData ? d_672_673 : null;
-        nhungHangLatchSettled[n] = true;
-        nhungHangLatchDone[n] = true;
-        if (!coData) dbg("nồi chiên " + n + " nhung_hang latch: hết " + PLC_LATCH_MAX_READS + " lần đọc vẫn 0 → chốt null");
+    if (!nhungHangTimeSettled[n]) {
+      nhungHangTimeReads[n] = (nhungHangTimeReads[n] || 0) + 1;
+      if (nenChotLatchPlcMotO(nhungHangTimeReads[n], giay_m1_m155)) {
+        hieuSuatNhungHang[n].giay_tu_start = giay_m1_m155 !== 0 ? giay_m1_m155 : null;
+        nhungHangTimeSettled[n] = true;
+        nhungHangTimeDone[n] = true;
+        if (giay_m1_m155 === 0) dbg("nồi chiên " + n + " nhung_hang thời gian: hết " + PLC_LATCH_MAX_READS + " lần đọc vẫn 0 → chốt null");
+      }
+    }
+
+    // --- Áp suất (D672/D673): tối đa PLC_LATCH_MAX_READS lần, chốt ĐỘC LẬP ---
+    if (!nhungHangPresSettled[n]) {
+      nhungHangPresReads[n] = (nhungHangPresReads[n] || 0) + 1;
+      if (nenChotLatchPlcMotO(nhungHangPresReads[n], d_672_673)) {
+        hieuSuatNhungHang[n].ap_suat_chan_khong = d_672_673 !== 0 ? d_672_673 : null;
+        nhungHangPresSettled[n] = true;
+        nhungHangPresDone[n] = true;
+        if (d_672_673 === 0) dbg("nồi chiên " + n + " nhung_hang áp suất: hết " + PLC_LATCH_MAX_READS + " lần đọc vẫn 0 → chốt null");
       }
     }
 
     // --- Persist: MỘT updateOne duy nhất cho row nhung_hang trong cycle này ---
     const newlyNHRoot = !prevNHRootDone && !!nhungHangRootDone[n];
     const newlyNHVN = !prevNHVongNuocDone && !!nhungHangVongNuocDone[n];
-    const newlyNHLatch = !prevNHLatchDone && !!nhungHangLatchDone[n];
+    const newlyNHTime = !prevNHTimeDone && !!nhungHangTimeDone[n];
+    const newlyNHPres = !prevNHPresDone && !!nhungHangPresDone[n];
     // Ô settled nhưng Done = false → write trước reject, cần retry
     const retryNHRoot = !!nhungHangRootSettled[n] && !nhungHangRootDone[n];
     const retryNHVN = !!nhungHangVongNuocSettled[n] && !nhungHangVongNuocDone[n];
-    const retryNHLatch = !!nhungHangLatchSettled[n] && !nhungHangLatchDone[n];
-    const hasNewNHCell = newlyNHRoot || newlyNHVN || newlyNHLatch;
-    const hasNHRetry = retryNHRoot || retryNHVN || retryNHLatch;
+    const retryNHTime = !!nhungHangTimeSettled[n] && !nhungHangTimeDone[n];
+    const retryNHPres = !!nhungHangPresSettled[n] && !nhungHangPresDone[n];
+    const hasNewNHCell = newlyNHRoot || newlyNHVN || newlyNHTime || newlyNHPres;
+    const hasNHRetry = retryNHRoot || retryNHVN || retryNHTime || retryNHPres;
     if (id_document[n] && (!nhungHangPersisted[n] || hasNewNHCell || hasNHRetry)) {
       try {
         if (!nhungHangPersisted[n]) {
@@ -692,22 +728,22 @@ exports.postDataPlc = async (
           // Whole-object ghi tất cả cells đã settled → đánh dấu Done cho chúng
           if (nhungHangRootSettled[n]) nhungHangRootDone[n] = true;
           if (nhungHangVongNuocSettled[n]) nhungHangVongNuocDone[n] = true;
-          if (nhungHangLatchSettled[n]) nhungHangLatchDone[n] = true;
+          if (nhungHangTimeSettled[n]) nhungHangTimeDone[n] = true;
+          if (nhungHangPresSettled[n]) nhungHangPresDone[n] = true;
         } else {
           const set = {};
           if (newlyNHRoot || retryNHRoot) set["hieu_suat_may.nhung_hang.dong_dien_dong_co_root"] = hieuSuatNhungHang[n].dong_dien_dong_co_root;
           if (newlyNHVN || retryNHVN) set["hieu_suat_may.nhung_hang.dong_dien_dong_co_vong_nuoc"] = hieuSuatNhungHang[n].dong_dien_dong_co_vong_nuoc;
-          if (newlyNHLatch || retryNHLatch) {
-            set["hieu_suat_may.nhung_hang.giay_tu_start"] = hieuSuatNhungHang[n].giay_tu_start;
-            set["hieu_suat_may.nhung_hang.ap_suat_chan_khong"] = hieuSuatNhungHang[n].ap_suat_chan_khong;
-          }
+          if (newlyNHTime || retryNHTime) set["hieu_suat_may.nhung_hang.giay_tu_start"] = hieuSuatNhungHang[n].giay_tu_start;
+          if (newlyNHPres || retryNHPres) set["hieu_suat_may.nhung_hang.ap_suat_chan_khong"] = hieuSuatNhungHang[n].ap_suat_chan_khong;
           if (Object.keys(set).length > 0) {
             await model.updateOne({ _id: id_document[n] }, { $set: set });
           }
           // Ghi thành công → mark Done cho các ô vừa ghi
           if (newlyNHRoot || retryNHRoot) nhungHangRootDone[n] = true;
           if (newlyNHVN || retryNHVN) nhungHangVongNuocDone[n] = true;
-          if (newlyNHLatch || retryNHLatch) nhungHangLatchDone[n] = true;
+          if (newlyNHTime || retryNHTime) nhungHangTimeDone[n] = true;
+          if (newlyNHPres || retryNHPres) nhungHangPresDone[n] = true;
         }
         dbg("nồi chiên " + n + " persist nhung_hang (cycle " + nhungHangCycles[n] + ")");
       } catch (err) {
@@ -715,7 +751,8 @@ exports.postDataPlc = async (
         // KHÔNG rollback Settled — giá trị RAM đã xác định, không bao giờ bị ghi đè.
         if (newlyNHRoot || retryNHRoot) nhungHangRootDone[n] = false;
         if (newlyNHVN || retryNHVN) nhungHangVongNuocDone[n] = false;
-        if (newlyNHLatch || retryNHLatch) nhungHangLatchDone[n] = false;
+        if (newlyNHTime || retryNHTime) nhungHangTimeDone[n] = false;
+        if (newlyNHPres || retryNHPres) nhungHangPresDone[n] = false;
         if (!nhungHangPersisted[n]) {
           // Row chưa ghi lần đầu → retry whole-object cycle sau
         }
@@ -861,18 +898,24 @@ exports.postDataPlc = async (
       hieuSuatKickRoot[n] = null;
       hieuSuatNhungHang[n] = null;
       kickRootCycles[n] = 0;
-      kickRootLatchReads[n] = 0;
-      kickRootLatchSettled[n] = false;
-      kickRootLatchDone[n] = false;
+      kickRootTimeReads[n] = 0;
+      kickRootTimeSettled[n] = false;
+      kickRootTimeDone[n] = false;
+      kickRootPresReads[n] = 0;
+      kickRootPresSettled[n] = false;
+      kickRootPresDone[n] = false;
       kickRootRootSettled[n] = false;
       kickRootRootDone[n] = false;
       kickRootVongNuocSettled[n] = false;
       kickRootVongNuocDone[n] = false;
       kickRootPersisted[n] = false;
       nhungHangCycles[n] = 0;
-      nhungHangLatchReads[n] = 0;
-      nhungHangLatchSettled[n] = false;
-      nhungHangLatchDone[n] = false;
+      nhungHangTimeReads[n] = 0;
+      nhungHangTimeSettled[n] = false;
+      nhungHangTimeDone[n] = false;
+      nhungHangPresReads[n] = 0;
+      nhungHangPresSettled[n] = false;
+      nhungHangPresDone[n] = false;
       nhungHangRootSettled[n] = false;
       nhungHangRootDone[n] = false;
       nhungHangVongNuocSettled[n] = false;

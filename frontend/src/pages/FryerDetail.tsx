@@ -13,6 +13,8 @@ import { useSocket } from '../hooks/useSocket';
 import { useFryerData } from '../hooks/useFryerData';
 import { useFleetHistory } from '../hooks/useFleetHistory';
 import { getNoiChien, getNoiChienDetail, suaNoiChienDetail, xoaNoiChienDetail } from '../api';
+import { downloadBatchSheet, type ExportFormat } from '../components/batchExport';
+import type { BatchListItem } from '../types';
 import type { StagePayload, SensorData, SetGiaiDoanStages123 } from '../types';
 import type { Period } from '../hooks/useThongKe';
 import styles from '../App.module.css';
@@ -123,6 +125,13 @@ export const FryerDetail: React.FC = () => {
     const docs = await getNoiChien(Number(soNoiChien));
     setBatchList(docs);
   }, [soNoiChien, setBatchDetail, setBatchList]);
+
+  // Danh sách chỉ có field nhẹ → phải lấy chi tiết mẻ mới đủ bien_du_lieu để xuất file.
+  const handleDownloadBatch = useCallback(async (batch: BatchListItem, format: ExportFormat) => {
+    const detail = await getNoiChienDetail(batch._id, Number(soNoiChien));
+    downloadBatchSheet(detail, { soNoiChien: Number(soNoiChien), trangThai: batch.trang_thai }, format);
+    setToastMsg(`Đã tải ${format === 'excel' ? 'Excel' : 'CSV'}: ${batch.ma_me_chien}`);
+  }, [soNoiChien]);
 
   const clearToast = useCallback(() => setToastMsg(null), []);
 
@@ -255,6 +264,7 @@ export const FryerDetail: React.FC = () => {
           onEdit={handleEditBatch}
           onDelete={handleDeleteBatch}
           onRefresh={handleRefreshBatchList}
+          onDownload={handleDownloadBatch}
         />
       </div>
 

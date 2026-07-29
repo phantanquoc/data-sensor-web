@@ -7,11 +7,38 @@ interface BatchListFilters {
 
 async function readJson<T>(res: Response): Promise<T> {
   const body = await res.json().catch(() => null);
+  if (res.status === 401) {
+    // Phiên hết hạn / chưa đăng nhập → về trang login, không nuốt lỗi âm thầm.
+    if (window.location.pathname !== '/login') {
+      window.location.assign('/login');
+    }
+    throw new Error('Chưa đăng nhập');
+  }
   if (!res.ok) {
     const message = body && typeof body.error === 'string' ? body.error : `HTTP ${res.status}`;
     throw new Error(message);
   }
   return body as T;
+}
+
+// ===== Xác thực =====
+export async function login(username: string, password: string): Promise<{ success: boolean; username: string }> {
+  return readJson(await fetch('/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  }));
+}
+
+export async function logout(): Promise<void> {
+  await fetch('/api/logout', { method: 'POST' });
+}
+
+// Không dùng readJson (nó redirect khi 401) — ở đây 401 là câu trả lời hợp lệ.
+export async function getMe(): Promise<{ authenticated: boolean; username?: string }> {
+  const res = await fetch('/api/me');
+  if (res.status === 401) return { authenticated: false };
+  return res.json();
 }
 
 export async function getNoiChien(n: number, filters: BatchListFilters = {}): Promise<BatchListItem[]> {
