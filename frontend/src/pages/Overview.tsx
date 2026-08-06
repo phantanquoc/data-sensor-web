@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Activity, Flame, ChevronRight, Sun, Moon, LogOut } from 'lucide-react';
+import { LayoutDashboard, Activity, Flame, ChevronRight, Sun, Moon, LogOut, Gauge } from 'lucide-react';
 import { logout } from '../api';
 import { useAllFryers } from '../hooks/useAllFryers';
 import { useTheme } from '../hooks/useTheme';
@@ -8,6 +8,8 @@ import { useFleetHistory } from '../hooks/useFleetHistory';
 import { MachineCard } from '../components/MachineCard';
 import { FleetLineChart } from '../components/FleetLineChart';
 import { StatsBar } from '../components/StatsBar';
+import { CaiDatHeThongModal } from '../components/CaiDatHeThongModal';
+import { Toast } from '../components/Toast';
 import type { Period } from '../hooks/useThongKe';
 
 const PERIODS: { key: Period; label: string }[] = [
@@ -34,14 +36,34 @@ export const Overview: React.FC = () => {
   const [customFrom, setCustomFrom] = useState<string>(todayYmd());
   const [customTo, setCustomTo] = useState<string>(todayYmd());
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [caiDatOpen, setCaiDatOpen] = useState(false);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
+  const pickerBtnRef = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
+
+  const clearToast = useCallback(() => setToastMsg(null), []);
 
   const handleLogout = async () => {
     await logout();
     // Reload để App kiểm tra lại phiên (getMe → 401) và hiện trang login.
     window.location.assign('/login');
   };
+
+  // Trả focus về nút mở menu sau khi đóng modal. Không dựa vào cơ chế tự khôi
+  // phục của modal được: nút "Cài đặt hệ thống" nằm trong dropdown và đã bị gỡ
+  // khỏi DOM ngay khi modal mở, nên nút bánh răng là điểm quay về hợp lý duy nhất.
+  // Đặt ở effect của trang cha để chạy SAU cleanup của modal, tránh bị ghi đè.
+  const caiDatWasOpen = useRef(false);
+  useEffect(() => {
+    if (caiDatOpen) {
+      caiDatWasOpen.current = true;
+      return;
+    }
+    if (!caiDatWasOpen.current) return;
+    caiDatWasOpen.current = false;
+    pickerBtnRef.current?.focus();
+  }, [caiDatOpen]);
 
   // Đóng menu chọn máy khi click ra ngoài hoặc nhấn Esc
   useEffect(() => {
@@ -71,6 +93,7 @@ export const Overview: React.FC = () => {
             <div ref={pickerRef} className="relative">
               <button
                 type="button"
+                ref={pickerBtnRef}
                 aria-label="Chọn máy để xem chi tiết"
                 aria-haspopup="menu"
                 aria-expanded={pickerOpen}
@@ -115,6 +138,24 @@ export const Overview: React.FC = () => {
                       <ChevronRight size={14} className="text-text-muted" />
                     </button>
                   ))}
+
+                  {/* Cài đặt dùng chung cả dàn — tách khỏi danh sách máy bằng
+                      đường kẻ để không bị đọc nhầm là "máy thứ 9". */}
+                  <div className="my-1 border-t border-border" />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setPickerOpen(false);
+                      setCaiDatOpen(true);
+                    }}
+                    className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-text-primary transition hover:bg-surface-overlay"
+                  >
+                    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-surface-overlay text-text-muted">
+                      <Gauge size={15} />
+                    </span>
+                    <span className="flex-1 font-semibold">Cài đặt hệ thống</span>
+                  </button>
                 </div>
               )}
             </div>
@@ -216,6 +257,10 @@ export const Overview: React.FC = () => {
               latestSeries={latest.tempSeries}
               previousSeries={previous.tempSeries}
             />
+            {/* Không truyền đường cài đặt ở trang tổng quan: mỗi nồi giờ có mục
+                tiêu riêng, vẽ tới 8 đường nét đứt chồng lên 8 đường đo sẽ rối
+                không đọc được. Đường mục tiêu nằm ở trang chi tiết từng nồi,
+                giống cách biểu đồ nhiệt độ bên cạnh đang làm. */}
             <FleetLineChart
               title="Áp chân không"
               unit="bar"
@@ -234,6 +279,15 @@ export const Overview: React.FC = () => {
           ))}
         </div>
       </section>
+
+      {caiDatOpen && (
+        <CaiDatHeThongModal
+          onClose={() => setCaiDatOpen(false)}
+          onSaved={(msg) => setToastMsg(msg)}
+        />
+      )}
+
+      <Toast message={toastMsg} onDone={clearToast} />
     </div>
   );
 };

@@ -231,6 +231,15 @@ export const FryerDetail: React.FC = () => {
                   unit="bar"
                   latestSeries={latest.apSeries}
                   previousSeries={previous.apSeries}
+                  // useFleetHistory ở trang này chỉ theo dõi đúng `soNoiChien`
+                  // (xem chartMachines), nên apSetpointSeries đã là mục tiêu của
+                  // riêng nồi đang xem — không lọc lại để tránh hai nguồn sự thật.
+                  latestSetpointSeries={latest.apSetpointSeries}
+                  previousSetpointSeries={previous.apSetpointSeries}
+                  setpointLabel="Áp suất cài đặt"
+                  // Chưa có ngưỡng sai lệch có căn cứ cho áp chân không: vẫn hiện con
+                  // số lệch nhưng không tô đỏ, bịa ngưỡng sẽ báo động nhầm mẻ bình thường.
+                  deviationWarningThreshold={null}
                 />
               </div>
             </section>

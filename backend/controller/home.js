@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const plcModels = require("../model/plc_schema");
+const CaiDatHeThong = require("../model/cai_dat_he_thong_schema");
 const { formatVietnamTimestamp, formatVietnamDateCode } = require("../utils/time");
 
 const MIN_MACHINE = 1;
@@ -334,5 +335,114 @@ exports.get_noi_chien_chart = async (req, res) => {
   } catch (err) {
     console.error('get_noi_chien_chart error:', err);
     return res.status(500).json({ error: 'Không thể tải dữ liệu biểu đồ' });
+  }
+};
+
+// Khoá cố định của document cấu hình singleton — mọi truy vấn đọc/ghi đều lọc
+// theo key này nên chỉ tồn tại đúng một bản cấu hình cho cả dàn.
+const CAU_HINH_KEY = 'cai_dat_he_thong';
+
+// Dùng lại hằng số và hàm bung dạng cũ từ utils: expandApSuatCaiDat là HÀM THUẦN
+// nên test được độc lập, và đây là điểm duy nhất hiểu được document dạng phẳng cũ.
+const {
+  MACHINE_NUMBERS,
+  GIAI_DOAN_AP_SUAT,
+  expandApSuatCaiDat,
+} = require('../utils/ap_suat_cai_dat');
+
+/**
+ * Chuẩn hoá một giá trị áp suất cài đặt do client gửi lên.
+ *
+ * Chấp nhận: null/undefined/chuỗi rỗng (nghĩa là "chưa cài đặt") và số hữu hạn >= 0.
+ * Chấp nhận 0 vì 0 là một con số hợp lệ về mặt dữ liệu — việc 0 không vẽ đường
+ * là quyết định của tầng biểu đồ, chặn ở API sẽ thành lỗi khó hiểu cho người dùng.
+ * Từ chối: số âm, NaN, Infinity, chuỗi không phải số, boolean, object.
+ *
+ * @returns {{ ok: true, value: number|null } | { ok: false }}
+ */
+function parseApSuatCaiDat(raw) {
+  if (raw === null || raw === undefined || raw === '') return { ok: true, value: null };
+  // Chặn boolean/array/object trước vì Number(true) = 1 và Number([]) = 0 sẽ lọt lưới.
+  if (typeof raw !== 'number' && typeof raw !== 'string') return { ok: false };
+  if (typeof raw === 'string' && raw.trim() === '') return { ok: true, value: null };
+  const num = Number(raw);
+  if (!Number.isFinite(num) || num < 0) return { ok: false };
+  return { ok: true, value: num };
+}
+
+/**
+ * Đảm bảo response luôn có đủ 8 máy × 4 giai đoạn, và bung document dạng phẳng
+ * cũ (4 giá trị dùng chung cả dàn) ra cho cả 8 máy.
+ */
+function toApSuatCaiDat(doc) {
+  return expandApSuatCaiDat(doc);
+}
+
+exports.get_cai_dat_he_thong = async (req, res) => {
+  try {
+    const doc = await CaiDatHeThong.findOne({ key: CAU_HINH_KEY }).lean();
+    // Trả 200 với toàn bộ giá trị null thay vì 404: "chưa cấu hình" là trạng thái
+    // hợp lệ mà UI phải hiển thị thành ô trống, không phải lỗi.
+    return res.json({ ap_suat_cai_dat: toApSuatCaiDat(doc) });
+  } catch (err) {
+    console.error('get_cai_dat_he_thong error:', err);
+    return res.status(500).json({ error: 'Không thể tải cài đặt hệ thống' });
+  }
+};
+
+/** Nhãn tiếng Việt của giai đoạn để thông báo lỗi chỉ đúng ô người dùng nhập sai. */
+function nhanGiaiDoan(gd) {
+  return `giai đoạn ${gd.replace('giai_doan_', '')}`;
+}
+
+exports.sua_cai_dat_he_thong = async (req, res) => {
+  const body = req.body?.ap_suat_cai_dat;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return res.status(400).json({ error: 'Thiếu dữ liệu áp suất cài đặt' });
+  }
+
+  // Chặn số máy ngoài 1..8 trước khi xét giá trị: một khoá lạ nghĩa là client
+  // đang gửi shape khác, ghi tiếp sẽ tạo dữ liệu không ai đọc được.
+  for (const key of Object.keys(body)) {
+    const n = Number(key);
+    if (!Number.isInteger(n) || !MACHINE_NUMBERS.includes(n)) {
+      return res.status(400).json({ error: `Số máy ${key} không hợp lệ (chỉ nhận 1 đến 8)` });
+    }
+  }
+
+  // Validate TRỌN VẸN cả 32 giá trị trước khi ghi: chỉ cần một giá trị sai là
+  // không ghi gì cả, tránh lưu nửa dàn khiến người dùng tưởng đã lưu xong.
+  const values = {};
+  for (const n of MACHINE_NUMBERS) {
+    const raw = body[n] ?? body[String(n)];
+    if (raw !== null && raw !== undefined && (typeof raw !== 'object' || Array.isArray(raw))) {
+      return res.status(400).json({ error: `Dữ liệu áp suất cài đặt của máy ${n} không hợp lệ` });
+    }
+    const perMay = {};
+    for (const gd of GIAI_DOAN_AP_SUAT) {
+      const parsed = parseApSuatCaiDat(raw ? raw[gd] : null);
+      if (!parsed.ok) {
+        return res.status(400).json({
+          error: `Áp suất cài đặt máy ${n} ${nhanGiaiDoan(gd)} phải là số không âm hoặc để trống`,
+        });
+      }
+      perMay[gd] = parsed.value;
+    }
+    values[n] = perMay;
+  }
+
+  try {
+    const updated = await CaiDatHeThong.findOneAndUpdate(
+      { key: CAU_HINH_KEY },
+      // Ghi đè cả nhánh ap_suat_cai_dat để document dạng phẳng cũ biến mất hẳn
+      // sau lần lưu đầu tiên, không còn lẫn hai shape trong cùng một document.
+      { $set: { ap_suat_cai_dat: values } },
+      // upsert: lần lưu đầu tiên tự tạo document nên không cần bước seed/migration.
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    ).lean();
+    return res.json({ ap_suat_cai_dat: toApSuatCaiDat(updated) });
+  } catch (err) {
+    console.error('sua_cai_dat_he_thong error:', err);
+    return res.status(500).json({ error: 'Không thể lưu cài đặt hệ thống' });
   }
 };

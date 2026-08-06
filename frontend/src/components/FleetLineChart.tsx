@@ -36,6 +36,18 @@ interface FleetLineChartProps {
   latestSetpointSeries?: MachineSeries[];
   /** Optional setpoint series for previous batch (dashed step line) */
   previousSetpointSeries?: MachineSeries[];
+  /**
+   * Nhãn chú giải của đường cài đặt. Mặc định giữ nguyên giá trị cũ để 4 biểu đồ
+   * nhiệt độ đang chạy không đổi một pixel nào khi không truyền prop này.
+   */
+  setpointLabel?: string;
+  /**
+   * Ngưỡng cảnh báo sai lệch trong tooltip. Mặc định là ngưỡng nhiệt độ.
+   * Truyền `null` khi đại lượng CHƯA có ngưỡng có căn cứ (áp suất chân không):
+   * vẫn hiện con số sai lệch nhưng không tô đỏ — bịa ngưỡng sẽ báo động nhầm
+   * trên những mẻ hoàn toàn bình thường.
+   */
+  deviationWarningThreshold?: number | null;
 }
 
 /* --- Custom Tooltip -------------------------------------------------------- */
@@ -55,9 +67,18 @@ interface CustomTooltipProps {
   unit: string;
   /** Whether this chart has setpoint lines (enables deviation display) */
   hasSetpoint?: boolean;
+  /** Ngưỡng tô đỏ sai lệch; null = hiện số nhưng không cảnh báo. */
+  deviationWarningThreshold?: number | null;
 }
 
-const CustomTooltip: React.FC<CustomTooltipProps> = ({ active, payload, label, unit, hasSetpoint }) => {
+const CustomTooltip: React.FC<CustomTooltipProps> = ({
+  active,
+  payload,
+  label,
+  unit,
+  hasSetpoint,
+  deviationWarningThreshold = TEMPERATURE_WARNING_DELTA,
+}) => {
   if (!active || !payload || payload.length === 0) return null;
 
   const visible = payload.filter((item) => item.value != null);
@@ -67,10 +88,12 @@ const CustomTooltip: React.FC<CustomTooltipProps> = ({ active, payload, label, u
   const measured = visible.filter((item) => item.dataKey.startsWith('m'));
   const setpoints = visible.filter((item) => item.dataKey.startsWith('s'));
 
-  // Build a lookup: machine number → setpoint value at this X
+  // Tra cứu: số máy → giá trị cài đặt tại điểm X này.
+  // Mỗi máy giờ có đường cài đặt riêng nên ghép thẳng `m${n}` với `s${n}`,
+  // không còn trường hợp một đường cài đặt dùng chung cho cả dàn.
   const spLookup: Record<string, number> = {};
   for (const sp of setpoints) {
-    // dataKey is `s${n}`, extract n
+    // dataKey là `s${n}`, lấy phần n
     const n = sp.dataKey.slice(1);
     if (typeof sp.value === 'number') spLookup[n] = sp.value;
   }
@@ -89,7 +112,10 @@ const CustomTooltip: React.FC<CustomTooltipProps> = ({ active, payload, label, u
         const deviation = hasSetpoint && typeof item.value === 'number' && spVal != null
           ? item.value - spVal
           : null;
-        const deviationWarn = deviation != null && Math.abs(deviation) >= TEMPERATURE_WARNING_DELTA;
+        const deviationWarn =
+          deviation != null &&
+          deviationWarningThreshold != null &&
+          Math.abs(deviation) >= deviationWarningThreshold;
         return (
           <div key={item.name} className="flex items-center gap-2 py-0.5">
             <span
@@ -207,6 +233,8 @@ export const FleetLineChart: React.FC<FleetLineChartProps> = ({
   previousSeries,
   latestSetpointSeries,
   previousSetpointSeries,
+  setpointLabel = 'Nhiệt độ cài đặt',
+  deviationWarningThreshold = TEMPERATURE_WARNING_DELTA,
 }) => {
   const [view, setView] = useState<ViewMode>('latest');
   const { theme } = useTheme();
@@ -301,7 +329,7 @@ export const FleetLineChart: React.FC<FleetLineChartProps> = ({
             tickFormatter={(v: number) => v.toFixed(0)}
             width={40}
           />
-          <Tooltip content={<CustomTooltip unit={unit} hasSetpoint={hasSetpoint} />} />
+          <Tooltip content={<CustomTooltip unit={unit} hasSetpoint={hasSetpoint} deviationWarningThreshold={deviationWarningThreshold} />} />
           <Legend
             formatter={(value: string) => (
               <span className="text-xs text-text-secondary">{value}</span>
@@ -326,7 +354,7 @@ export const FleetLineChart: React.FC<FleetLineChartProps> = ({
           {setpointMachines.map((s) => (
             <Line
               key={`sp-${s.n}`}
-              name="Nhiệt độ cài đặt"
+              name={setpointLabel}
               dataKey={`s${s.n}`}
               stroke={chrome.setpoint}
               strokeWidth={1.5}

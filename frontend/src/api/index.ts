@@ -1,4 +1,4 @@
-import type { BatchListItem, BatchDocument, ThongKe } from '../types';
+import type { BatchListItem, BatchDocument, ThongKe, ApSuatCaiDat, CaiDatHeThong } from '../types';
 
 interface BatchListFilters {
   from?: string;
@@ -92,4 +92,20 @@ export async function getNoiChienChart(id: string, n: number): Promise<{
   giai_doan_4?: { bien_du_lieu?: Array<{ thoi_gian?: string; nhiet_do?: number; ap_suat_chan_khong?: number }> };
 }> {
   return readJson(await fetch(`/get_noi_chien_chart?id=${encodeURIComponent(id)}&so_noiChien=${n}`));
+}
+
+// ===== Cài đặt hệ thống =====
+// Cả hai hàm đi qua readJson để giữ hành vi redirect khi 401 — nếu dùng
+// fetch().json() trần thì phiên hết hạn sẽ thành lỗi parse khó hiểu.
+
+export async function getCaiDatHeThong(): Promise<CaiDatHeThong> {
+  return readJson<CaiDatHeThong>(await fetch('/cai_dat_he_thong'));
+}
+
+export async function luuCaiDatHeThong(apSuatCaiDat: ApSuatCaiDat): Promise<CaiDatHeThong> {
+  return readJson<CaiDatHeThong>(await fetch('/cai_dat_he_thong', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ap_suat_cai_dat: apSuatCaiDat }),
+  }));
 }

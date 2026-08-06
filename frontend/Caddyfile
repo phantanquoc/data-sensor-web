@@ -18,7 +18,7 @@
 
 	# REST API → backend. Dùng tiền tố nên /get_noi_chien* phủ luôn
 	# /get_noi_chien_chart và /get_noi_chien_detail (giống proxy của Vite).
-	@api path /api/* /thong_ke* /get_noi_chien* /sua_noi_chien_detail* /xoa_noi_chien_detail* /enable_machine*
+	@api path /api/* /thong_ke* /get_noi_chien* /sua_noi_chien_detail* /xoa_noi_chien_detail* /enable_machine* /cai_dat_he_thong*
 	handle @api {
 		reverse_proxy iot-gateway:3000
 	}

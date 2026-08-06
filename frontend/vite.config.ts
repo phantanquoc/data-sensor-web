@@ -13,6 +13,7 @@ const proxy = {
   '/sua_noi_chien_detail': BACKEND,
   '/xoa_noi_chien_detail': BACKEND,
   '/enable_machine': BACKEND,
+  '/cai_dat_he_thong': BACKEND,
   '/socket.io': {
     target: BACKEND,
     ws: true,

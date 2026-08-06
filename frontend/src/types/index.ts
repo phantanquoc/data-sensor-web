@@ -159,3 +159,26 @@ export interface BatchDocument {
   nhung_long_dau?: NhungLongDau | null;
   [key: string]: unknown;
 }
+
+/**
+ * Áp suất chân không cài đặt của MỘT nồi — 4 giai đoạn.
+ * null = chưa cài đặt giai đoạn đó, khác hẳn 0 (là một giá trị đã nhập).
+ */
+export interface ApSuatCaiDatMay {
+  giai_doan_1: number | null;
+  giai_doan_2: number | null;
+  giai_doan_3: number | null;
+  giai_doan_4: number | null;
+}
+
+/**
+ * Cấu hình áp suất theo TỪNG MÁY, khoá là số nồi 1..8 (1-based, khớp với
+ * noi_chien_1..8 và /may/:n). Mỗi nồi có bộ 4 giai đoạn riêng vì đặc tính bơm
+ * hút chân không của từng nồi khác nhau.
+ */
+export type ApSuatCaiDat = Record<number, ApSuatCaiDatMay>;
+
+/** Cấu hình hệ thống trả về từ GET/PUT /cai_dat_he_thong */
+export interface CaiDatHeThong {
+  ap_suat_cai_dat: ApSuatCaiDat;
+}

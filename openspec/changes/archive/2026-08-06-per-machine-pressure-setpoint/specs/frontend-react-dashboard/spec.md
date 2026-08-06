@@ -1,50 +1,4 @@
-## Purpose
-
-The React + TypeScript dashboard's observable contract: how it consumes the REST endpoints and the `noi_chien_N_data` / `noi_chien_N_stop` socket events, renders the 8-tab realtime view with SVG donut timers, the sensor grid, the batch list, and the batch detail averages, and how it subscribes to realtime data through the shared socket manager.
-## Requirements
-### Requirement: Detail page socket listener efficiency
-The `useSocket` hook SHALL register event listeners only for the currently active fryer (soNoiChien), not for all 8 fryers.
-
-#### Scenario: Listener registration on mount
-- **WHEN** `useSocket` mounts with `soNoiChien = "3"`
-- **THEN** it registers listeners only on `noi_chien_3_data` and `noi_chien_3_stop` events (not on all 8 fryers)
-
-#### Scenario: Listener re-registration on tab switch
-- **WHEN** `soNoiChien` changes from "3" to "5"
-- **THEN** the hook unregisters `noi_chien_3_data` / `noi_chien_3_stop` and registers `noi_chien_5_data` / `noi_chien_5_stop`
-
-### Requirement: Overview hooks use shared socket manager
-Both `useAllFryers` and `useFleetHistory` SHALL use the shared socket manager instead of creating their own Socket.IO connections.
-
-#### Scenario: useAllFryers subscribes via shared manager
-- **WHEN** the Overview page mounts
-- **THEN** `useAllFryers` subscribes to all 8 fryer data events through the shared socket manager (no `io({ forceNew: true })` calls)
-
-#### Scenario: useFleetHistory subscribes via shared manager
-- **WHEN** the Overview page mounts
-- **THEN** `useFleetHistory` subscribes to all 8 fryer data events through the same shared socket manager instance used by `useAllFryers`
-
-### Requirement: useFleetHistory uses chart endpoint
-The `useFleetHistory` hook SHALL use the lightweight `/get_noi_chien_chart` endpoint for initial batch data loading instead of the full `/get_noi_chien_detail` endpoint.
-
-#### Scenario: Initial load uses chart endpoint
-- **WHEN** `useFleetHistory` loads batch history for each machine on mount
-- **THEN** it calls `GET /get_noi_chien_chart` (not `GET /get_noi_chien_detail`) to get only timestamp + temperature + vacuum pressure data
-
-### Requirement: System settings entry in the machine picker
-The machine-picker dropdown on the Overview page SHALL include a "Cài đặt hệ thống" entry positioned after the eight machine entries and visually separated from them by a divider.
-
-#### Scenario: Entry rendered at the bottom of the dropdown
-- **WHEN** the user opens the machine-picker dropdown
-- **THEN** the eight machine entries are listed first, followed by a divider, followed by a "Cài đặt hệ thống" entry carrying a lucide icon and `role="menuitem"`
-
-#### Scenario: Entry opens the settings modal
-- **WHEN** the user activates the "Cài đặt hệ thống" entry
-- **THEN** the dropdown closes and the settings modal opens
-
-#### Scenario: Machine navigation unaffected
-- **WHEN** the user activates any of the eight machine entries
-- **THEN** navigation to `/may/<n>` behaves exactly as before the settings entry was added
+## MODIFIED Requirements
 
 ### Requirement: Pressure setpoint settings modal
 The settings modal SHALL present a machine selector for fryers 1 through 8 together with four numeric inputs — one per fryer stage (GĐ1 through GĐ4) — showing the target vacuum pressure for the currently selected machine, plus a save action, a cancel action, and an action that applies the currently entered four values to all 8 machines.
@@ -155,7 +109,7 @@ The settings modal SHALL be operable by keyboard and correctly announced by assi
 `FleetLineChart` SHALL accept the setpoint line's legend label as a prop, defaulting to `"Nhiệt độ cài đặt"` so the temperature chart is unchanged.
 
 #### Scenario: Pressure chart shows a pressure label
-- **WHEN** the vacuum pressure chart renders its setpoint line
+- **WHEN** the detail page's vacuum pressure chart renders its setpoint line
 - **THEN** the legend shows a pressure-appropriate label, not `"Nhiệt độ cài đặt"`
 
 #### Scenario: Temperature chart label unchanged
@@ -174,6 +128,8 @@ The settings modal SHALL be operable by keyboard and correctly announced by assi
 - **THEN** the numeric deviation is shown
 - **AND** no warning highlight is applied unless a pressure threshold with a documented justification has been established — an arbitrary threshold MUST NOT be invented to drive the highlight
 
+## ADDED Requirements
+
 ### Requirement: Tooltip pairs setpoints by machine number
 The chart tooltip SHALL pair each measured line with the setpoint line carrying the same machine number, for both the temperature and pressure charts. No sentinel machine number or shared-setpoint fallback SHALL remain in the pairing logic.
 
@@ -190,4 +146,3 @@ The chart tooltip SHALL pair each measured line with the setpoint line carrying 
 - **WHEN** the codebase is inspected after this change
 - **THEN** `frontend/src/components/sharedSetpointKey.ts` and `test/shared_setpoint_key.test.js` no longer exist
 - **AND** no import of the removed module remains in `FleetLineChart.tsx`
-

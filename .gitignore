@@ -18,3 +18,7 @@ frontend/dist/
 
 # local agent tooling
 .claude/
+.codex/config.toml
+opencode.json
+.claude/settings.local.json
+.mcp.json

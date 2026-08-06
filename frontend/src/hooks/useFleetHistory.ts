@@ -42,6 +42,16 @@ import type {
   SetGiaiDoanStages123,
 } from '../types';
 import { buildBatchSetpointPoints, isLiveSetpointValid } from './setpointBuilder';
+import {
+  buildPressureSetpointPoints,
+  hasAnyPressureSetpoint,
+  type ApSuatCaiDatConfig,
+} from './pressureSetpointBuilder';
+import {
+  getApSuatCaiDatCache,
+  loadApSuatCaiDat,
+  subscribeApSuatCaiDat,
+} from './apSuatCaiDatStore';
 
 /** A single chart data point */
 export interface ChartPoint {
@@ -64,8 +74,23 @@ export interface MachineSeries {
 
 /** Return shape of the hook */
 export interface FleetHistoryState {
-  latest: { tempSeries: MachineSeries[]; apSeries: MachineSeries[]; setpointSeries: MachineSeries[] };
-  previous: { tempSeries: MachineSeries[]; apSeries: MachineSeries[]; setpointSeries: MachineSeries[] };
+  latest: {
+    tempSeries: MachineSeries[];
+    apSeries: MachineSeries[];
+    setpointSeries: MachineSeries[];
+    /**
+     * Áp suất mục tiêu — MỘT series cho mỗi máy có cấu hình, mang đúng số hiệu
+     * máy của nó (`n` = 1..8) nên ghép cặp với đường đo cùng máy ở tooltip và
+     * theo máy đó qua mọi lần luân chuyển thế hệ.
+     */
+    apSetpointSeries: MachineSeries[];
+  };
+  previous: {
+    tempSeries: MachineSeries[];
+    apSeries: MachineSeries[];
+    setpointSeries: MachineSeries[];
+    apSetpointSeries: MachineSeries[];
+  };
 }
 /**
  * Chart series palette — 8 visually distinct colors, harmonious with the brand
@@ -101,6 +126,34 @@ const GEN_WINDOW_MS = 30 * 60 * 1000;
  */
 const REFETCH_ATTEMPTS = 8;
 const REFETCH_DELAY_MS = 20_000;
+
+/** Màu chỉ để thoả kiểu MachineSeries — FleetLineChart vẽ đường cài đặt bằng màu chrome riêng. */
+const AP_SETPOINT_COLOR = '#94a3b8';
+
+/**
+ * Dựng series áp suất mục tiêu cho một thế hệ mẻ từ chính các series đo được.
+ *
+ * Mỗi máy suy ra đường mục tiêu từ CHÍNH các điểm đo của nó, không lấy hợp mốc
+ * phút cả dàn: mục tiêu giờ khác nhau theo máy nên hợp mốc sẽ trộn giai đoạn của
+ * máy này với mục tiêu của máy khác. Suy theo từng máy cũng làm trục X của đường
+ * mục tiêu trùng khít đường đo, và tự thừa hưởng giới hạn MAX_POINTS đã áp cho
+ * mảng đo nên không cần cap lại.
+ */
+function buildApSetpointSeries(
+  series: MachineSeries[],
+  config: ApSuatCaiDatConfig | null,
+): MachineSeries[] {
+  if (series.length === 0 || !config) return [];
+
+  const out: MachineSeries[] = [];
+  for (const s of series) {
+    if (!hasAnyPressureSetpoint(config, s.n)) continue;
+    const points = buildPressureSetpointPoints(s.points, config, s.n);
+    if (points.length === 0) continue;
+    out.push({ n: s.n, color: AP_SETPOINT_COLOR, points });
+  }
+  return out;
+}
 
 function capPoints(points: ChartPoint[]): ChartPoint[] {
   if (points.length <= MAX_POINTS) return points;
@@ -260,9 +313,16 @@ export function useFleetHistory(machines?: number[]): FleetHistoryState {
   const stableKey = useMemo(() => machineListKey(trackedMachines), [trackedMachines]);
 
   const [state, setState] = useState<FleetHistoryState>({
-    latest: { tempSeries: [], apSeries: [], setpointSeries: [] },
-    previous: { tempSeries: [], apSeries: [], setpointSeries: [] },
+    latest: { tempSeries: [], apSeries: [], setpointSeries: [], apSetpointSeries: [] },
+    previous: { tempSeries: [], apSeries: [], setpointSeries: [], apSetpointSeries: [] },
   });
+
+  /**
+   * Cấu hình áp suất mục tiêu hiện hành. Giữ ở ref chứ không ở state: nó chỉ là
+   * đầu vào để dựng lại series trong pushState, đặt vào state sẽ thêm một lượt
+   * render trung gian mà series chưa kịp cập nhật.
+   */
+  const apCaiDatRef = useRef<ApSuatCaiDatConfig | null>(getApSuatCaiDatCache());
 
   // --- Per-machine refs (latest batch) ---
   const latestBatchStartRef = useRef<Record<number, number>>({});
@@ -333,10 +393,44 @@ export function useFleetHistory(machines?: number[]): FleetHistoryState {
     }
 
     setState({
-      latest: { tempSeries: latestTemp, apSeries: latestAp, setpointSeries: latestSp },
-      previous: { tempSeries: prevTemp, apSeries: prevAp, setpointSeries: prevSp },
+      latest: {
+        tempSeries: latestTemp,
+        apSeries: latestAp,
+        setpointSeries: latestSp,
+        // Suy ra từ chính series đo ĐÃ ĐƯỢC ĐỊNH TUYẾN ở trên, nên tự thừa hưởng
+        // toàn bộ logic thế hệ / rotation / refetch mà không cần thêm ref song song.
+        apSetpointSeries: buildApSetpointSeries(latestAp, apCaiDatRef.current),
+      },
+      previous: {
+        tempSeries: prevTemp,
+        apSeries: prevAp,
+        setpointSeries: prevSp,
+        apSetpointSeries: buildApSetpointSeries(prevAp, apCaiDatRef.current),
+      },
     });
   };
+
+  /**
+   * pushState mới nhất, để effect đăng ký store gọi được mà không phải đưa
+   * pushState vào deps (nó được tạo lại mỗi lần render).
+   */
+  const pushStateRef = useRef(pushState);
+  pushStateRef.current = pushState;
+
+  /** Danh sách máy đang theo dõi, cho các luồng ngoài effect chính dùng lại. */
+  const trackedRef = useRef<number[]>(trackedMachines);
+  trackedRef.current = trackedMachines;
+
+  // Nạp cấu hình áp suất khi mount và vẽ lại ngay khi có người lưu cài đặt mới —
+  // người vận hành lưu xong mà vẫn thấy đường cũ thì không biết lưu có ăn không.
+  useEffect(() => {
+    const unsubscribe = subscribeApSuatCaiDat((value) => {
+      apCaiDatRef.current = value;
+      pushStateRef.current(trackedRef.current);
+    });
+    void loadApSuatCaiDat();
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     // Danh sách máy theo dõi hiện tại — parse lại từ stableKey vì effect
@@ -366,8 +460,8 @@ export function useFleetHistory(machines?: number[]): FleetHistoryState {
     fleetGenRef.current = 0;
     // Xoá state React ngay để UI không hiện dữ liệu máy cũ trong lúc REST load.
     setState({
-      latest: { tempSeries: [], apSeries: [], setpointSeries: [] },
-      previous: { tempSeries: [], apSeries: [], setpointSeries: [] },
+      latest: { tempSeries: [], apSeries: [], setpointSeries: [], apSetpointSeries: [] },
+      previous: { tempSeries: [], apSeries: [], setpointSeries: [], apSetpointSeries: [] },
     });
 
     const subKeys: Array<{ n: number; key: symbol }> = [];
